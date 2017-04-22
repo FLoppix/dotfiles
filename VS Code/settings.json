@@ -1,0 +1,60 @@
+// Place your settings in this file to overwrite the default settings
+{
+
+    /** Font settings **/
+    "editor.fontSize": 13,
+    "editor.lineHeight": 16,
+    
+
+    /* Terminal */
+    "terminal.integrated.fontFamily": "'SourceCodePro+Powerline+Awesome Regular'",
+
+    /** Workbench Settings **/
+    "workbench.editor.showTabs": false,
+    "workbench.statusBar.visible": false,
+    "workbench.activityBar.visible": false,
+
+    /** Exclusion **/
+    "files.exclude": {
+        "node_modules/": true,
+        "**/._*": true,
+        "**/*.o": true,
+        "**/*.class" : true,
+        "**/*.vscode": true,
+        "**/*.log": true,
+        "**/*.project": true,
+        "**/*.classpath": true
+    },
+
+    /** Explorer Settings **/
+
+    "explorer.openEditors.visible": 0,
+    "explorer.autoReveal": false,
+
+
+    /** Terminal Settings **/
+    "terminal.integrated.fontFamily": "Meslo LG M DZ for Powerline",
+
+    /** JSON Schema **/
+    "json.schemas": [
+    {
+        "fileMatch": [
+            "/bower.json"
+        ],
+        "url": "http://json.schemastore.org/bower"
+    }
+    ]
+
+,
+"vsicons.dontShowNewVersionMessage": true,
+"workbench.colorTheme": "Solarized Dark",
+"workbench.iconTheme": "vscode-icons",
+"java.errors.incompleteClasspath.severity": "ignore",
+"[cpp]": {
+    "editor.quickSuggestions": false
+},
+"[c]": {
+    "editor.quickSuggestions": false
+},
+"window.zoomLevel": 0
+}
