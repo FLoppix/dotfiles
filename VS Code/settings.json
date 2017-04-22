@@ -8,6 +8,9 @@
 
     /* Terminal */
     "terminal.integrated.fontFamily": "'SourceCodePro+Powerline+Awesome Regular'",
+    "terminal.integrated.fontSize": 14,
+    "terminal.integrated.fontLigatures": true,
+    "terminal.integrated.lineHeight": 1.2,
 
     /** Workbench Settings **/
     "workbench.editor.showTabs": false,
@@ -47,7 +50,7 @@
 
 ,
 "vsicons.dontShowNewVersionMessage": true,
-"workbench.colorTheme": "Solarized Dark",
+"workbench.colorTheme": "An Old Hope",
 "workbench.iconTheme": "vscode-icons",
 "java.errors.incompleteClasspath.severity": "ignore",
 "[cpp]": {
@@ -56,5 +59,11 @@
 "[c]": {
     "editor.quickSuggestions": false
 },
-"window.zoomLevel": 0
+"window.zoomLevel": 0,
+
+/* Plugin */
+ "gitProjectManager.baseProjectsFolders": [
+        "/Users/felixboenke/git"
+    ]
+
 }
