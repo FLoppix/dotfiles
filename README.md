@@ -9,33 +9,36 @@ Managed with [chezmoi](https://www.chezmoi.io/).
 
 ## Setup on a new machine
 
-### 1. Install chezmoi
+### One-liner (macOS with Homebrew)
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/FLoppix/dotfiles/master/install.sh | bash
+```
+
+Or clone and run locally:
+
+```bash
+git clone https://github.com/FLoppix/dotfiles.git ~/code/dotfiles
+~/code/dotfiles/install.sh
+```
+
+### Manual steps
+
+If you prefer to do it manually:
+
+```bash
+# 1. Install chezmoi
 brew install chezmoi
-```
 
-### 2. Initialize and apply dotfiles
+# 2. Apply dotfiles
+chezmoi init --apply https://github.com/FLoppix/dotfiles.git
 
-```bash
-chezmoi init --apply https://github.com/yourusername/dotfiles.git
-```
+# 3. Install TPM (Tmux Plugin Manager)
+git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
 
-Or if you prefer to set the source directory explicitly:
-
-```bash
-chezmoi init --source ~/code/dotfiles --apply
-```
-
-### 3. Install Neovim dependencies
-
-Open Neovim and let `vim.pack` install plugins automatically:
-
-```bash
+# 4. Open Neovim to let plugins install automatically
 nvim
 ```
-
-Run `:checkhealth` to verify everything is set up correctly.
 
 ## Day-to-day workflow
 
