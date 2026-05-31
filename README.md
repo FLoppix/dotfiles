@@ -33,10 +33,13 @@ brew install chezmoi
 # 2. Apply dotfiles
 chezmoi init --apply https://github.com/FLoppix/dotfiles.git
 
-# 3. Install TPM (Tmux Plugin Manager)
+# 3. Install tree-sitter CLI (required by nvim-treesitter)
+brew install tree-sitter
+
+# 4. Install TPM (Tmux Plugin Manager)
 git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
 
-# 4. Open Neovim to let plugins install automatically
+# 5. Open Neovim to let plugins install automatically
 nvim
 ```
 

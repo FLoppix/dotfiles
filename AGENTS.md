@@ -90,6 +90,7 @@
 - **Neovim** ≥ 0.9 (Lua-native config)
 - **chezmoi** (dotfile manager)
 - **tmux** + TPM (tmux plugin manager)
+- **tree-sitter CLI** (required by nvim-treesitter to compile parsers)
 - **Homebrew** (macOS) — used in install script
 
 ## Notes for Agents

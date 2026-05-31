@@ -19,6 +19,14 @@ else
     chezmoi init --apply https://github.com/FLoppix/dotfiles.git
 fi
 
+# Install tree-sitter CLI (required by nvim-treesitter)
+if ! command -v tree-sitter &> /dev/null; then
+    echo "==> Installing tree-sitter CLI..."
+    brew install tree-sitter
+else
+    echo "==> tree-sitter CLI already installed"
+fi
+
 # Install TPM (Tmux Plugin Manager)
 if [ ! -d "$HOME/.tmux/plugins/tpm" ]; then
     echo "==> Installing Tmux Plugin Manager (TPM)..."
