@@ -13,24 +13,26 @@
 
 ```
 .
-├── dot_config/nvim/       → ~/.config/nvim (Neovim config)
-│   ├── init.lua           → Entry point
-│   ├── lua/keymaps.lua    → Key mappings
-│   ├── lua/options.lua    → Editor settings
-│   ├── lua/colorschema.lua → Theme setup
-│   ├── lua/pack.lua       → Plugin manager (lazy.nvim)
-│   ├── lua/commands.lua   → Custom commands
-│   └── lua/plugins/       → Plugin configs
-│       ├── lsp.lua
-│       ├── telescope.lua
-│       ├── neo-tree.lua
-│       ├── lualine.lua
-│       ├── treesitter.lua
-│       ├── diagnostic.lua
-│       ├── code-actions.lua
-│       ├── whichkey.lua
-│       └── mini.lua
-├── dot_tmux.conf          → ~/.tmux.conf (tmux config)
+├── dot_config/
+│   ├── nvim/                → ~/.config/nvim (Neovim config)
+│   │   ├── init.lua           → Entry point
+│   │   ├── lua/keymaps.lua    → Key mappings
+│   │   ├── lua/options.lua    → Editor settings
+│   │   ├── lua/colorschema.lua → Theme setup
+│   │   ├── lua/pack.lua       → Plugin manager (lazy.nvim)
+│   │   ├── lua/commands.lua   → Custom commands
+│   │   └── lua/plugins/       → Plugin configs
+│   │       ├── lsp.lua
+│   │       ├── telescope.lua
+│   │       ├── neo-tree.lua
+│   │       ├── lualine.lua
+│   │       ├── treesitter.lua
+│   │       ├── diagnostic.lua
+│   │       ├── code-actions.lua
+│   │       ├── whichkey.lua
+│   │       └── mini.lua
+│   └── tmux/
+│       └── tmux.conf        → ~/.config/tmux/tmux.conf (tmux config)
 ├── install.sh             → Bootstrap script for new machines
 └── README.md              → Human docs
 ```
@@ -63,7 +65,7 @@
 
 ### tmux
 
-- Config is a single file: `dot_tmux.conf`.
+- Config is a single file: `dot_config/tmux/tmux.conf`.
 - Prefix key: `C-space` (not `C-b`).
 - Uses TPM (Tmux Plugin Manager) — plugins declared at the bottom of the file.
 

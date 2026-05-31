@@ -5,7 +5,7 @@ Managed with [chezmoi](https://www.chezmoi.io/).
 ## What's included
 
 - **Neovim** (`~/.config/nvim`) – Full IDE setup with LSP, Telescope, Neo-tree, and more
-- **tmux** (`~/.tmux.conf`) – Terminal multiplexer with vim-tmux-navigator
+- **tmux** (`~/.config/tmux/tmux.conf`) – Terminal multiplexer with vim-tmux-navigator
 
 ## Setup on a new machine
 
