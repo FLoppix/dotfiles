@@ -1,6 +1,27 @@
 local mason = require("mason")
+local registry = require("mason-registry")
 
-require("mason").setup()
+mason.setup()
+
+local ensure_installed = {
+	"lua-language-server",
+	"marksman",
+	"gopls",
+	"rust-analyzer",
+	"typescript-language-server",
+	"pyright",
+}
+
+local function install_missing_servers()
+	for _, name in ipairs(ensure_installed) do
+		local ok, package = pcall(registry.get_package, name)
+		if ok and not package:is_installed() then
+			package:install()
+		end
+	end
+end
+
+registry.refresh(install_missing_servers)
 
 vim.keymap.set("n", "gd", vim.lsp.buf.definition, { desc = "Go to definition" })
 vim.keymap.set("n", "gD", vim.lsp.buf.declaration, { desc = "Go to declaration" })
@@ -33,5 +54,6 @@ vim.lsp.enable({
 	"marksman",
 	"gopls",
 	"rust_analyzer",
-	"ts_ls"
+	"ts_ls",
+	"pyright",
 })
