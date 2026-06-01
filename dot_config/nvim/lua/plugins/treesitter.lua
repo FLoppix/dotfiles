@@ -1,8 +1,9 @@
 local treesitter = require("nvim-treesitter")
 
 local ensure_installed = {
-    "go", "rust", "typescript", "javascript", "tsx",
-    "html", "css", "json", "bash",
+    "go", "rust", "python", "lua",
+    "typescript", "javascript", "tsx",
+    "html", "css", "json", "bash", "markdown", "markdown_inline",
     "http", "dockerfile",
 }
 
