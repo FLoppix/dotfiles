@@ -1,5 +1,6 @@
 vim.pack.add({
     { src = "https://github.com/nvim-lua/plenary.nvim" },
+    { src = "https://github.com/christoomey/vim-tmux-navigator" },
     { src = "https://github.com/nvim-telescope/telescope.nvim" },
     { src = "https://github.com/nvim-lualine/lualine.nvim" },
     { src = "https://github.com/echasnovski/mini.nvim",           version = "stable" },
