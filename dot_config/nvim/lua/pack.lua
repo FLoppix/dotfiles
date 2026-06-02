@@ -15,5 +15,6 @@ vim.pack.add({
         version = vim.version.range('3')
     },
     "https://github.com/MunifTanjim/nui.nvim",
-    "https://github.com/nvim-tree/nvim-web-devicons"
+    "https://github.com/nvim-tree/nvim-web-devicons",
+    { src = "https://github.com/MeanderingProgrammer/render-markdown.nvim" }
 })
