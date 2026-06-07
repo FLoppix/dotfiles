@@ -9,6 +9,10 @@ lualine.setup({
 		lualine_b = { "branch", "diff", "diagnostics" },
 		lualine_c = {
 			{
+				"filename",
+				path = 1,
+			},
+			{
 				"buffers",
 				show_filename_only = true,
 				show_modified_status = true,
