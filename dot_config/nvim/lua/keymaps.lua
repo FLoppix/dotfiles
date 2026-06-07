@@ -48,6 +48,7 @@ vim.keymap.set("n", "<Tab>", ":bnext<CR>", { desc = "Next buffer", silent = true
 vim.keymap.set("n", "<S-Tab>", ":bprev<CR>", { desc = "Previous buffer", silent = true })
 
 -- Buffer management
+vim.keymap.set("n", "<leader>bp", "<C-^>", { desc = "Jump to previous buffer" })
 vim.keymap.set("n", "<leader>bn", ":enew<CR>", { desc = "New empty buffer", silent = true })
 vim.keymap.set("n", "<leader>bd", function()
 	require("mini.bufremove").delete(0, false)
