@@ -58,19 +58,19 @@ chezmoi edit ~/.config/nvim/init.lua
 # Or edit directly in the source directory
 cd ~/code/dotfiles
 nvim dot_config/nvim/init.lua
-chezmoi apply
+chezmoi --source ~/code/dotfiles apply
 ```
 
 ### See what would change
 
 ```bash
-chezmoi diff
+chezmoi --source ~/code/dotfiles diff
 ```
 
 ### Apply all changes
 
 ```bash
-chezmoi apply
+chezmoi --source ~/code/dotfiles apply
 ```
 
 After changing the Rex config, reload it in the running server:
@@ -112,6 +112,7 @@ git push
 | `gd` | Go to definition |
 | `gr` | Find references |
 | `K` | Hover docs |
+| `dd` | Delete line without copying |
 | `<leader>|` | Vertical split |
 | `<leader>-` | Horizontal split |
 | `<Tab>` / `<S-Tab>` | Cycle buffers |
