@@ -16,5 +16,6 @@ vim.pack.add({
     },
     "https://github.com/MunifTanjim/nui.nvim",
     "https://github.com/nvim-tree/nvim-web-devicons",
-    { src = "https://github.com/MeanderingProgrammer/render-markdown.nvim" }
+    { src = "https://github.com/MeanderingProgrammer/render-markdown.nvim" },
+    { src = "https://github.com/Saghen/blink.cmp", version = vim.version.range('1') },
 })

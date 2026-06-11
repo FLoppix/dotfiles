@@ -37,7 +37,7 @@ vim.keymap.set("i", "<C-k>", vim.lsp.buf.signature_help, { desc = "Signature hel
 vim.diagnostic.config({ virtual_text = true })
 
 local capabilities = vim.lsp.protocol.make_client_capabilities()
-capabilities = vim.tbl_deep_extend("force", capabilities, require("mini.completion").get_lsp_capabilities())
+capabilities = vim.tbl_deep_extend("force", capabilities, require("blink.cmp").get_lsp_capabilities())
 
 vim.lsp.config("*", { capabilities = capabilities })
 

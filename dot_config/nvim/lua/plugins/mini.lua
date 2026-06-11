@@ -10,11 +10,15 @@ miniNotify.setup({
     },
 })
 
+
 --- mini cmdline completion ---
 require("mini.cmdline").setup({
     autocorrect = { enable = false }
 })
 
+
+--- mini pairs (auto-close brackets & quotes) ---
+require("mini.pairs").setup()
 
 --- mini surround ---
 require("mini.surround").setup()
