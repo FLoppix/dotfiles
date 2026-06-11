@@ -46,8 +46,8 @@ require('blink.cmp').setup({
       border = 'rounded',
       draw = {
         columns = {
-          { 'kind_icon', 'label', 'label_description', gap = 1 },
-          { 'kind' },
+          { 'kind_icon' },
+          { 'label', 'label_description', gap = 1 },
         },
       },
     },
@@ -60,6 +60,31 @@ require('blink.cmp').setup({
 
   sources = {
     default = { 'lsp', 'path', 'snippets', 'buffer' },
+    providers = {
+      lsp = {
+        name = 'LSP',
+        module = 'blink.cmp.sources.lsp',
+        score_offset = 100,
+        transform_items = function(_, items)
+          -- Filter: only show functions, methods, classes, constructors, interfaces, structs
+          local allowed_kinds = {
+            [vim.lsp.protocol.CompletionItemKind.Function] = true,
+            [vim.lsp.protocol.CompletionItemKind.Method] = true,
+            [vim.lsp.protocol.CompletionItemKind.Class] = true,
+            [vim.lsp.protocol.CompletionItemKind.Constructor] = true,
+            [vim.lsp.protocol.CompletionItemKind.Interface] = true,
+            [vim.lsp.protocol.CompletionItemKind.Struct] = true,
+          }
+          local filtered = {}
+          for _, item in ipairs(items) do
+            if allowed_kinds[item.kind] then
+              table.insert(filtered, item)
+            end
+          end
+          return filtered
+        end,
+      },
+    },
   },
 
   fuzzy = {
