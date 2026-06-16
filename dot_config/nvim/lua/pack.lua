@@ -18,4 +18,5 @@ vim.pack.add({
     "https://github.com/nvim-tree/nvim-web-devicons",
     { src = "https://github.com/MeanderingProgrammer/render-markdown.nvim" },
     { src = "https://github.com/Saghen/blink.cmp", version = vim.version.range('1') },
+    { src = "https://github.com/ThePrimeagen/harpoon", version = "harpoon2" },
 })
