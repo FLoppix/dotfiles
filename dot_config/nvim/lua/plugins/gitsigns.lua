@@ -61,10 +61,10 @@ vim.keymap.set('n', '<leader>gD', function()
   gitsigns.diffthis('~')
 end, { desc = 'Gitsigns: Diff buffer (against HEAD)' })
 
--- Toggles
-vim.keymap.set('n', '<leader>gt', gitsigns.toggle_signs, { desc = 'Gitsigns: Toggle signs' })
-vim.keymap.set('n', '<leader>gT', gitsigns.toggle_current_line_blame, { desc = 'Gitsigns: Toggle line blame' })
-vim.keymap.set('n', '<leader>gw', gitsigns.toggle_word_diff, { desc = 'Gitsigns: Toggle word diff' })
+-- Toggles (avoid <leader>g* sub-keys; `gt` is mapped to LSP type definition in lsp.lua
+-- and the leader dispatches `gt`, shadowing these bindings)
+vim.keymap.set('n', '<leader>tg', gitsigns.toggle_signs, { desc = 'Gitsigns: Toggle signs' })
+vim.keymap.set('n', '<leader>lb', gitsigns.toggle_current_line_blame, { desc = 'Gitsigns: Toggle line blame' })
 
 -- Text object: select a hunk
 vim.keymap.set({ 'o', 'x' }, 'ih', gitsigns.select_hunk, { desc = 'Gitsigns: Select hunk' })
