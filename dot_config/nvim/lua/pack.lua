@@ -19,4 +19,5 @@ vim.pack.add({
     { src = "https://github.com/MeanderingProgrammer/render-markdown.nvim" },
     { src = "https://github.com/Saghen/blink.cmp", version = vim.version.range('1') },
     { src = "https://github.com/ThePrimeagen/harpoon", version = "harpoon2" },
+    { src = 'https://github.com/lewis6991/gitsigns.nvim' },
 })
