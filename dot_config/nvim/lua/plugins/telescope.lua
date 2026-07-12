@@ -5,7 +5,12 @@ telescope.setup({})
 
 vim.keymap.set("n", "<leader>ff", builtin.find_files, { desc = "Telescope find files" })
 vim.keymap.set("n", "<leader>fw", builtin.live_grep, { desc = "Telescope live grep" })
-vim.keymap.set("n", "<leader>fr", builtin.resume, { desc = "Resume last Telescope search" })
+vim.keymap.set("n", "<leader>fr", function()
+  builtin.oldfiles({ only_cwd = true })
+end, { desc = "Recent files (this project)" })
+
+-- Resume the last Telescope picker (global state, not project-scoped).
+vim.keymap.set("n", "<leader>fR", builtin.resume, { desc = "Resume last Telescope search" })
 vim.keymap.set("n", "<leader>cd", function()
 	builtin.diagnostics({ bufnr = 0 })
 end, { desc = "List diagnostics in current buffer" })
