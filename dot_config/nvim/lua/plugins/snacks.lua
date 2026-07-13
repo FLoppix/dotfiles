@@ -1,9 +1,8 @@
--- Minimal snacks.nvim setup: dashboard + terminal enabled.
+-- Minimal snacks.nvim setup: dashboard + terminal + words + notifier.
 -- See https://github.com/folke/snacks.nvim for the full list of picks.
 --
 -- Snacks only enables picks that are explicitly listed in `setup(opts)`.
--- Every other pick (picker, notifier, statuscolumn, words, indent, ...)
--- stays off.
+-- Every other pick (picker, statuscolumn, indent, bigfile, ...) stays off.
 
 -- Snappier feel: disable built-in animations.
 vim.g.snacks_animate = false
@@ -22,7 +21,30 @@ require('snacks').setup({
 
     -- Toggleable terminal windows. See :h snacks-terminal
     terminal = {},
+
+    -- Auto-highlight LSP references under the cursor and jump between them.
+    -- See :h snacks-words
+    words = {},
+
+    -- Notification system. Replaces `vim.notify` (previously mini.notify).
+    -- See :h snacks-notifier
+    notifier = {},
 })
+
+-- Words keymaps -----------------------------------------------------------
+-- `[r` / `]r` jump to the previous / next LSP reference of the word under the
+-- cursor, cycling around. Needs an LSP attached to the buffer.
+local words = require('snacks.words')
+
+vim.keymap.set('n', ']r', function() words.jump(1, true) end, { desc = 'Words: next reference' })
+vim.keymap.set('n', '[r', function() words.jump(-1, true) end, { desc = 'Words: prev reference' })
+
+-- Notifier keymaps --------------------------------------------------------
+-- `<leader>n` group is registered in plugins/whichkey.lua.
+local notifier = require('snacks.notifier')
+
+vim.keymap.set('n', '<leader>nh', function() notifier.show_history() end, { desc = 'Notifier: history' })
+vim.keymap.set('n', '<leader>nd', function() notifier.hide() end, { desc = 'Notifier: dismiss all' })
 
 -- Terminal keymaps ---------------------------------------------------------
 -- `<leader>t` group is registered in plugins/whichkey.lua.

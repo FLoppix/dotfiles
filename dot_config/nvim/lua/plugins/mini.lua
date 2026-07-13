@@ -1,16 +1,4 @@
----- mini notify ----
-local miniNotify = require("mini.notify")
-
-miniNotify.setup({
-    -- only show messages
-    content = {
-        format = function(notif)
-            return notif.msg
-        end,
-    },
-})
-
-
+---- cmdline completion / pairs / surround (mini.notify removed in favor of snacks.notifier) ----
 --- mini cmdline completion ---
 require("mini.cmdline").setup({
     autocorrect = { enable = false }

@@ -8,4 +8,5 @@ wk.add({
   { "<leader>f", group = "Find" },
   { "<leader>c", group = "Code" },
   { "<leader>t", group = "Terminal" },
+  { "<leader>n", group = "Notifier" },
 })
