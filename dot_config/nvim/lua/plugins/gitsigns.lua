@@ -20,7 +20,6 @@ gitsigns.setup({
   word_diff = false,
   attach_to_untracked = true,
   update_debounce = 100,
-  auto_watch = true,
 })
 
 -- Navigation: jump between hunks
