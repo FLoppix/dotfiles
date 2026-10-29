@@ -141,6 +141,7 @@ Rex keeps its own defaults; the prefix sequences below mirror the tmux workflow.
 | `C-space + -` | Split down |
 | `C-space + c` | New tab |
 | `C-space + n` / `p` | Next / previous tab |
+| `C-space + 1`–`9` | Jump to tab N |
 | `C-space + z` | Zoom pane |
 | `C-space + x` | Close pane |
 | `C-space + arrows` | Resize pane (`Shift` + arrows = bigger step) |
