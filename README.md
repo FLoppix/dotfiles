@@ -6,6 +6,7 @@ Managed with [chezmoi](https://www.chezmoi.io/).
 
 - **Neovim** (`~/.config/nvim`) – Full IDE setup with LSP, Telescope, Neo-tree, and more
 - **tmux** (`~/.config/tmux/tmux.conf`) – Terminal multiplexer with vim-tmux-navigator
+- **Rex** (`~/.config/rex/init.lua`) – Tmux-style prefix, popups, and custom actions for the [Rex](https://www.superlogical.com/rex) terminal multiplexer
 
 ## Setup on a new machine
 
@@ -43,6 +44,9 @@ git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
 nvim
 ```
 
+Rex is a separate app install — get it from https://www.superlogical.com/rex. Its
+config is applied by chezmoi like the rest; reload it with `rex config reload`.
+
 ## Day-to-day workflow
 
 ### Edit a config
@@ -67,6 +71,13 @@ chezmoi diff
 
 ```bash
 chezmoi apply
+```
+
+After changing the Rex config, reload it in the running server:
+
+```bash
+rex config check          # validate without applying
+rex config reload         # apply to the running server
 ```
 
 ### Update from remote
@@ -118,6 +129,31 @@ git push
 | `C-h/j/k/l` | Navigate panes (vim-tmux-navigator) |
 | `C-space + r` | Reload config |
 | `C-space + arrows` | Resize panes |
+
+## Key Rex mappings
+
+Rex keeps its own defaults; the prefix sequences below mirror the tmux workflow.
+
+| Key | Action |
+|---|---|
+| `C-space` | Prefix for the sequences below |
+| `C-space + \|` | Split right |
+| `C-space + -` | Split down |
+| `C-space + c` | New tab |
+| `C-space + n` / `p` | Next / previous tab |
+| `C-space + z` | Zoom pane |
+| `C-space + x` | Close pane |
+| `C-space + arrows` | Resize pane (`Shift` + arrows = bigger step) |
+| `C-space + f` | Session switcher |
+| `C-space + g` | lazygit popup |
+| `C-space + G` | ghui popup |
+| `C-space + h` | hunk diff popup |
+| `C-space + t` | worktree switch popup |
+| `C-space + r` | Reload Rex config |
+| `C-space + C-space` | Send a literal `C-space` to the terminal |
+
+> Rex's own defaults (Cmd-based shortcuts) still apply; the config is additive.
+> The popups open as floating panes in the focused pane's working directory.
 
 ## License
 
