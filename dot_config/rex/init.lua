@@ -50,6 +50,57 @@ rex.bind("ctrl+space>r", "client.config.reload")
 rex.bind("ctrl+space>ctrl+space", "pane.send_key", { key = "ctrl+space" })
 
 ----------------------------------------------------------------------
+-- Vim-style pane navigation (Ctrl+h/j/k/l)
+----------------------------------------------------------------------
+
+-- Programs that keep Ctrl+h/j/k/l for themselves, the same programs
+-- vim-tmux-navigator passes keys through to in tmux.
+local keeps_nav_keys = {
+  vi = true,
+  vim = true,
+  vimx = true,
+  nvim = true,
+  gvim = true,
+  view = true,
+  gview = true,
+  vimdiff = true,
+  nvimdiff = true,
+  gvimdiff = true,
+  fzf = true,
+}
+
+local function foreground_name(ctx)
+  local args = {}
+  if ctx.block_id ~= nil then
+    args.block_id = ctx.block_id
+  end
+
+  local process = rex.block.call(terminal, "process", args)
+  if process == nil or process.foreground == nil then
+    return nil
+  end
+  return process.foreground.name
+end
+
+local function navigate(direction)
+  return function(ctx)
+    -- Let vim, nvim, and friends handle the key in their own windows.
+    if keeps_nav_keys[foreground_name(ctx) or ""] then
+      return false
+    end
+
+    local _, err = rex.session.focus_direction{ direction = direction }
+    if err ~= nil then error(err, 0) end
+    return true
+  end
+end
+
+rex.bind("ctrl+h", navigate("left"))
+rex.bind("ctrl+j", navigate("down"))
+rex.bind("ctrl+k", navigate("up"))
+rex.bind("ctrl+l", navigate("right"))
+
+----------------------------------------------------------------------
 -- Floating tools (tmux popup equivalents)
 ----------------------------------------------------------------------
 
