@@ -34,7 +34,9 @@
 │   ├── tmux/
 │   │   └── tmux.conf        → ~/.config/tmux/tmux.conf (tmux config)
 │   └── rex/
-│       └── init.lua         → ~/.config/rex/init.lua (Rex config)
+│       ├── init.lua         → ~/.config/rex/init.lua (bindings, popups)
+│       ├── context.lua      → Shared cwd/block helpers
+│       └── worktrees.lua    → Worktree tab actions
 ├── install.sh             → Bootstrap script for new machines
 └── README.md              → Human docs
 ```
@@ -73,12 +75,22 @@
 
 ### Rex
 
-- Config is a single file: `dot_config/rex/init.lua` (Lua, read by the Rex server).
+- Config entry point: `dot_config/rex/init.lua`; extra modules live beside it and are pulled in with `require(...)` (Rex resolves them relative to the config dir).
+- `context.lua` holds shared helpers (`cwd_of`, `block_cwd`, `popup`, flavor names).
+- `worktrees.lua` defines the workmux-style worktree flow: one git worktree per **session** named `<project>/<name>`, with `nvim` and agent windows. Actions: `worktree_add`, `worktree_open`, `worktree_remove`, plus the `*_prompt` pickers.
+- One-key triggers: `ctrl+space>w` (agent picker + name prompt), `ctrl+space>o` (existing worktree picker), `ctrl+space>shift+w` (remove picker); `ctrl+space>]` / `[` cycle sessions. Switch sessions with `ctrl+space>f`.
+- Agents are listed at the top of `worktrees.lua`; the picker shows installed ones, last used first (`~/.local/state/rex/worktree-agent`). The installed list is cached 60s for speed, but the last-used ordering is computed per call.
+- Picker scripts log failures to `~/.local/state/rex/worktree.log` and keep the error on screen until Enter, so failures are diagnosable.
+- **Server-side PATH gotcha**: `rex.exec` inside actions runs with the server's minimal PATH (`/usr/local/bin:/usr/bin:...`), so agent and `rex` lookup go through the user's **login + interactive shell** (`zsh -lic`). Terminal blocks themselves get the normal login-shell PATH.
+- Sessions are created with `rex.call("session.create", { label, initial_windows })` — the `rex.session.*` Lua helper has no `create`/`destroy`. Cross-session teardown cannot use `session.destroy` (409 conflict); `worktree_remove` resolves the `rex` CLI path and runs `rex kill <session_id>`.
+- The `*_prompt` actions open a floating layer running a small `sh -c` script that calls `rex do -s "$1" ...`; the pickers need `fzf`, and `worktree_open_prompt` uses `jq`.
 - Prefix sequences mirror the tmux config: `ctrl+space>` (`|` split right, `-` split down, arrows resize, `r` reload).
 - Floating tool popups are custom actions (`popup_lazygit`, `popup_hunk`, `popup_ghui`, `popup_wt`); they open in the focused pane's working directory.
-- After editing: `chezmoi apply ~/.config/rex/init.lua`, then `rex config check` and `rex config reload`. Rex does not watch the file.
+- Worktree actions are also CLI-invokable: `rex do worktree_add name=foo agent=pi`, `rex do worktree_open name=foo`, `rex do worktree_remove name=foo`.
+- After editing: `chezmoi apply ~/.config/rex`, then `rex config check` and `rex config reload`. Rex does not watch the file.
 - If `~/.config/rex` doesn't exist yet, `mkdir -p ~/.config/rex` before applying a single target.
-- Verify the loaded bindings with `rex keymap`.
+- Verify the loaded bindings with `rex keymap` and the actions with `rex actions`.
+- Actions have ~30s to finish: keep `rex.exec` calls short; long setup work belongs in a pane.
 
 ## Common Tasks
 
@@ -92,6 +104,10 @@
 | Check Rex config | `rex config check` |
 | Reload Rex config | `rex config reload` |
 | Show Rex bindings | `rex keymap` |
+| Add worktree session | `C-space + w`, or `rex do worktree_add name=foo` |
+| Open worktree session | `C-space + o`, or `rex do worktree_open name=foo` |
+| Remove worktree session | `C-space + W`, or `rex do worktree_remove name=foo` |
+| List sessions | `rex ls` |
 | Update from remote | `chezmoi update` |
 
 ## Testing Changes

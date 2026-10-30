@@ -8,8 +8,8 @@
 -- Rex ships usable defaults; everything here is additive. The prefix
 -- bindings mirror the tmux workflow in dot_config/tmux/tmux.conf.
 
-local shell = "com.superlogical.terminal.shell"
-local terminal = "com.superlogical.terminal"
+local context = require("context")
+local terminal = context.terminal
 
 ----------------------------------------------------------------------
 -- tmux-style prefix (Ctrl+Space)
@@ -24,9 +24,13 @@ rex.bind("ctrl+space>c", "client.tab.new")
 rex.bind("ctrl+space>n", "client.tab.next")
 rex.bind("ctrl+space>p", "client.tab.previous")
 
+-- Sessions (one per worktree).
+rex.bind("ctrl+space>]", "session.next")
+rex.bind("ctrl+space>[", "session.previous")
+
 -- Jump to tab N with prefix + 1..9.
 for i = 1, 9 do
-  rex.bind("ctrl+space>" .. i, "client.tab.goto", { index = i })
+    rex.bind("ctrl+space>" .. i, "client.tab.goto", { index = i })
 end
 
 -- Pane.
@@ -110,47 +114,13 @@ rex.bind("ctrl+l", navigate("right"))
 ----------------------------------------------------------------------
 
 -- The working directory of the terminal the action was run from.
-local function cwd_of(ctx)
-    local args = {}
-    if ctx.block_id ~= nil then
-        args.block_id = ctx.block_id
-    end
-
-    local result = rex.block.call(terminal, "pwd", args)
-    if result == nil or type(result.pwd) ~= "string" then
-        return os.getenv("HOME")
-    end
-
-    -- pwd comes back as a file URL: file://host/path
-    local path = result.pwd:gsub("^file://[^/]*", "")
-    return (path:gsub("%%(%x%x)", function(hex)
-        return string.char(tonumber(hex, 16))
-    end))
-end
-
-local function popup(ctx, command, label, bounds)
-    local result, err = rex.session.new_layer {
-        bounds = bounds,
-        focus = true,
-        layout = rex.layout.block {
-            flavor = shell,
-            label = label,
-            options = {
-                command = command,
-                cwd = cwd_of(ctx),
-            },
-        },
-    }
-    if result == nil then error(err, 0) end
-end
-
 rex.action {
     name = "popup_lazygit",
     title = "Popup: lazygit",
     category = "Popups",
     keywords = "git lazygit popup",
     run = function(ctx)
-        popup(ctx, { "lazygit" }, "lazygit", { 0.1, 0.1, 0.8, 0.8 })
+        context.popup(ctx, { "lazygit" }, "lazygit", { 0.1, 0.1, 0.8, 0.8 })
     end,
 }
 
@@ -160,7 +130,7 @@ rex.action {
     category = "Popups",
     keywords = "git diff hunk review popup",
     run = function(ctx)
-        popup(ctx, { "hunk", "diff" }, "hunk", { 0.05, 0.05, 0.9, 0.9 })
+        context.popup(ctx, { "hunk", "diff" }, "hunk", { 0.05, 0.05, 0.9, 0.9 })
     end,
 }
 
@@ -170,7 +140,7 @@ rex.action {
     category = "Popups",
     keywords = "github ghui pr popup",
     run = function(ctx)
-        popup(ctx, { "ghui" }, "ghui", { 0.1, 0.1, 0.8, 0.8 })
+        context.popup(ctx, { "ghui" }, "ghui", { 0.1, 0.1, 0.8, 0.8 })
     end,
 }
 
@@ -180,7 +150,7 @@ rex.action {
     category = "Popups",
     keywords = "wt worktree switch popup",
     run = function(ctx)
-        popup(ctx, { "wt", "switch" }, "wt switch", { 0.1, 0.1, 0.8, 0.8 })
+        context.popup(ctx, { "wt", "switch" }, "wt switch", { 0.1, 0.1, 0.8, 0.8 })
     end,
 }
 
@@ -188,3 +158,9 @@ rex.bind("ctrl+space>g", "popup_lazygit")
 rex.bind("ctrl+space>shift+g", "popup_ghui")
 rex.bind("ctrl+space>h", "popup_hunk")
 rex.bind("ctrl+space>t", "popup_wt")
+
+----------------------------------------------------------------------
+-- Worktree tabs (workmux-style)
+----------------------------------------------------------------------
+
+require("worktrees")

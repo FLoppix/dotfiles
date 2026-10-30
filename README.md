@@ -145,16 +145,63 @@ Rex keeps its own defaults; the prefix sequences below mirror the tmux workflow.
 | `C-space + z` | Zoom pane |
 | `C-space + x` | Close pane |
 | `C-space + arrows` | Resize pane (`Shift` + arrows = bigger step) |
-| `C-space + f` | Session switcher |
+| `C-space + f` | Session switcher (= worktree switcher) |
+| `C-space + ]` / `[` | Next / previous session |
 | `C-space + g` | lazygit popup |
 | `C-space + G` | ghui popup |
 | `C-space + h` | hunk diff popup |
 | `C-space + t` | worktree switch popup |
+| `C-space + w` | New worktree session (agent + name prompt) |
+| `C-space + o` | Open worktree session (fzf picker) |
+| `C-space + W` | Remove worktree session (fzf picker) |
 | `C-space + r` | Reload Rex config |
 | `C-space + C-space` | Send a literal `C-space` to the terminal |
 
 > Rex's own defaults (Cmd-based shortcuts) still apply; the config is additive.
 > The popups open as floating panes in the focused pane's working directory.
+
+## Worktree sessions (workmux-style)
+
+`dot_config/rex/worktrees.lua` gives Rex a workmux-like flow: **one git
+worktree per session**, named `<project>/<name>` (e.g. `dotfiles/stripe-fix`),
+with two windows:
+
+- `nvim` — Neovim in the worktree
+- `<agent>` — pi / claude / codex / opencode / amp (active window)
+
+Switch between worktrees with the session picker (`C-space + f`) or
+`C-space + ]` / `[`. Agents are configured at the top of `worktrees.lua`; the
+picker lists the ones installed, most recently used first.
+
+The fastest way in: **`C-space + w`** (pick agent, type name),
+**`C-space + o`** (pick an existing worktree), **`C-space + W`** (remove).
+
+From the CLI:
+
+```bash
+# Create <repo>__worktrees/<name> on branch wm/<name> and open its session
+rex do worktree_add name=my-feature
+rex do worktree_add name=my-feature agent=claude
+
+# Open an existing worktree (reuses the live session when present)
+rex do worktree_open name=my-feature agent=pi
+
+# Remove the worktree, close its session, delete the branch when merged
+rex do worktree_remove name=my-feature
+rex do worktree_remove name=my-feature force=true   # discard changes
+```
+
+Notes:
+
+- Worktrees live beside the repo in `<project>__worktrees/`; branches are `wm/<name>`.
+- Running an action from inside another worktree still targets the main checkout
+  (it reads `git worktree list`).
+- Removing the worktree you are currently in is refused: switch sessions first.
+- `worktree_add` rolls back the worktree and branch if the session can't be created.
+- The last used agent is remembered in `~/.local/state/rex/worktree-agent`.
+- Picker failures are appended to `~/.local/state/rex/worktree.log`; the popup keeps the error on screen until you press Enter.
+- Actions have ~30s to finish, so keep creation hooks short; long setup work
+  belongs in a window.
 
 ## License
 
