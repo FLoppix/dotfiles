@@ -33,6 +33,10 @@ for i = 1, 9 do
     rex.bind("ctrl+space>" .. i, "client.tab.goto", { index = i })
 end
 
+-- Rename, following the tmux defaults: prefix + , / $.
+rex.bind("ctrl+space>,", "client.tab.rename")
+rex.bind("ctrl+space>shift+4", "session.rename")
+
 -- Pane.
 rex.bind("ctrl+space>z", "pane.zoom")
 rex.bind("ctrl+space>x", "pane.close")
@@ -160,7 +164,41 @@ rex.bind("ctrl+space>h", "popup_hunk")
 rex.bind("ctrl+space>t", "popup_wt")
 
 ----------------------------------------------------------------------
--- Worktree tabs (workmux-style)
+-- Rename a pane (block label)
+----------------------------------------------------------------------
+
+rex.action {
+    name = "rename_pane_prompt",
+    title = "Rename Pane (ask)…",
+    description = "Ask for a new name for the focused pane.",
+    category = "Pane",
+    keywords = "rename pane block label title",
+    run = function(ctx)
+        local block_id = context.focused_block_id(ctx)
+        if block_id == nil then
+            error("rename_pane_prompt: no focused pane", 0)
+        end
+
+        local script = table.concat({
+            'printf "pane name: "',
+            'read -r label || exit 1',
+            '[ -n "$label" ] || exit 0',
+            'exec rex block rename -s "$1" "$2" "$label"',
+        }, "\n")
+
+        context.popup(
+            ctx,
+            { "sh", "-c", script, "rename-pane", ctx.session_id, block_id },
+            "rename pane",
+            { 0.35, 0.42, 0.3, 0.1 }
+        )
+    end,
+}
+
+rex.bind("ctrl+space>l", "rename_pane_prompt")
+
+----------------------------------------------------------------------
+-- Worktree sessions (workmux-style)
 ----------------------------------------------------------------------
 
 require("worktrees")

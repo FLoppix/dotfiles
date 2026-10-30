@@ -32,6 +32,7 @@ local editor = { "nvim" }
 local STATE_DIR = (os.getenv("HOME") or "") .. "/.local/state/rex"
 local LAST_AGENT_FILE = STATE_DIR .. "/worktree-agent"
 local LOG_FILE = STATE_DIR .. "/worktree.log"
+local SESSION_MAP_FILE = STATE_DIR .. "/worktree-sessions"
 
 local function trim(text)
     return (text:gsub("%s+$", ""))
@@ -326,6 +327,79 @@ local function find_session(label)
     return nil
 end
 
+-- Worktree path -> session id, so renaming a session keeps it findable.
+local function read_session_map()
+    local map = {}
+    local file = io.open(SESSION_MAP_FILE, "r")
+    if file == nil then
+        return map
+    end
+    for line in file:lines() do
+        local path, id = line:match("^(.-)\t(.+)$")
+        if path ~= nil and id ~= nil then
+            map[path] = id
+        end
+    end
+    file:close()
+    return map
+end
+
+local function write_session_map(map)
+    rex.exec({ "mkdir", "-p", STATE_DIR }, { timeout = 5 })
+    local paths = {}
+    for path in pairs(map) do
+        paths[#paths + 1] = path
+    end
+    table.sort(paths)
+
+    local file = io.open(SESSION_MAP_FILE, "w")
+    if file == nil then
+        return
+    end
+    for _, path in ipairs(paths) do
+        file:write(path, "\t", map[path], "\n")
+    end
+    file:close()
+end
+
+local function remember_session(path, session_id)
+    local map = read_session_map()
+    map[path] = session_id
+    write_session_map(map)
+end
+
+local function forget_session(path)
+    local map = read_session_map()
+    if map[path] ~= nil then
+        map[path] = nil
+        write_session_map(map)
+    end
+end
+
+-- Find the session for a worktree by its label, falling back to the id it had
+-- when it was created (a renamed session no longer matches the label).
+local function find_worktree_session(path, label)
+    local sessions = list_sessions()
+
+    for _, session in ipairs(sessions) do
+        if session.label == label then
+            remember_session(path, session.session_id)
+            return session
+        end
+    end
+
+    local mapped = read_session_map()[path]
+    if mapped ~= nil then
+        for _, session in ipairs(sessions) do
+            if session.session_id == mapped then
+                return session
+            end
+        end
+        forget_session(path)
+    end
+    return nil
+end
+
 local function known_worktrees(root)
     local result = rex.exec({ "git", "-C", root, "worktree", "list", "--porcelain" }, { timeout = 10 })
     local paths = {}
@@ -371,7 +445,7 @@ rex.action {
         local root = require_root(ctx, "worktree_add")
         local path, branch = worktree_paths(root, args.name)
         local label = session_label(root, args.name)
-        if find_session(label) ~= nil then
+        if find_worktree_session(path, label) ~= nil then
             error("worktree_add: session " .. label .. " already exists; use worktree_open instead", 0)
         end
         local spec = args.agent or default_agent()
@@ -390,6 +464,7 @@ rex.action {
         end
 
         write_last_agent(spec)
+        remember_session(path, created.session_id)
 
         return {
             name = args.name,
@@ -419,7 +494,7 @@ rex.action {
         local path, branch = worktree_paths(root, args.name)
         local label = session_label(root, args.name)
 
-        local existing = find_session(label)
+        local existing = find_worktree_session(path, label)
         if existing ~= nil then
             return { name = args.name, worktree = path, branch = branch, label = label,
                 session_id = existing.session_id, existing = true }
@@ -434,6 +509,7 @@ rex.action {
 
         local _, created = create_session(root, args.name, path, spec)
         write_last_agent(spec)
+        remember_session(path, created.session_id)
 
         return {
             name = args.name,
@@ -463,7 +539,7 @@ rex.action {
         local path, branch = worktree_paths(root, args.name)
         local label = session_label(root, args.name)
 
-        local existing = find_session(label)
+        local existing = find_worktree_session(path, label)
         if existing ~= nil and existing.session_id == ctx.session_id then
             error("worktree_remove: this worktree is open in the current session; switch sessions first", 0)
         end
@@ -482,6 +558,8 @@ rex.action {
         end
         remove[#remove + 1] = path
         run_ok(remove, { timeout = 25 })
+
+        forget_session(path)
 
         -- The branch only goes when it is already merged.
         local branch_result = run({ "git", "-C", root, "branch", "-d", branch }, { timeout = 10 })

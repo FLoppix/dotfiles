@@ -142,6 +142,9 @@ Rex keeps its own defaults; the prefix sequences below mirror the tmux workflow.
 | `C-space + c` | New tab |
 | `C-space + n` / `p` | Next / previous tab |
 | `C-space + 1`–`9` | Jump to tab N |
+| `C-space + ,` | Rename tab (tmux `prefix + ,`) |
+| `C-space + $` | Rename session (tmux `prefix + $`) |
+| `C-space + l` | Rename pane |
 | `C-space + z` | Zoom pane |
 | `C-space + x` | Close pane |
 | `C-space + arrows` | Resize pane (`Shift` + arrows = bigger step) |
@@ -200,6 +203,7 @@ Notes:
 - `worktree_add` rolls back the worktree and branch if the session can't be created.
 - The last used agent is remembered in `~/.local/state/rex/worktree-agent`.
 - Picker failures are appended to `~/.local/state/rex/worktree.log`; the popup keeps the error on screen until you press Enter.
+- Renaming a worktree session is safe: the worktree → session id mapping is kept in `~/.local/state/rex/worktree-sessions`, so open/remove still find it.
 - Actions have ~30s to finish, so keep creation hooks short; long setup work
   belongs in a window.
 

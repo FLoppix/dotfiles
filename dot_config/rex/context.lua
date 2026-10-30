@@ -37,24 +37,29 @@ function M.block_cwd(block_id)
     return nil
 end
 
--- The working directory of the terminal an action was run from, or HOME.
--- Falls back to the focused block of the action's active window, so actions
--- run from the CLI (with no block of their own) still resolve a directory.
-function M.cwd_of(ctx)
-    local block_id = ctx.block_id
-    if block_id == nil then
-        local view = rex.session.view {}
-        local windows = view and view.windows or {}
-        for _, window in ipairs(windows) do
-            if window.window_id == view.active_window_id then
-                block_id = window.focused_block_id
-            end
-        end
-        if block_id == nil and windows[1] ~= nil then
-            block_id = windows[1].focused_block_id
-        end
+-- The block an action should act on: its own block, else the focused block
+-- of its active window (CLI runs have no block of their own).
+function M.focused_block_id(ctx)
+    if ctx.block_id ~= nil then
+        return ctx.block_id
     end
 
+    local view = rex.session.view {}
+    local windows = view and view.windows or {}
+    for _, window in ipairs(windows) do
+        if window.window_id == view.active_window_id then
+            return window.focused_block_id
+        end
+    end
+    if windows[1] ~= nil then
+        return windows[1].focused_block_id
+    end
+    return nil
+end
+
+-- The working directory of the terminal an action was run from, or HOME.
+function M.cwd_of(ctx)
+    local block_id = M.focused_block_id(ctx)
     if block_id ~= nil then
         local cwd = M.block_cwd(block_id)
         if cwd ~= nil then

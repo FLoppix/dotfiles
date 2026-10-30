@@ -79,6 +79,8 @@
 - `context.lua` holds shared helpers (`cwd_of`, `block_cwd`, `popup`, flavor names).
 - `worktrees.lua` defines the workmux-style worktree flow: one git worktree per **session** named `<project>/<name>`, with `nvim` and agent windows. Actions: `worktree_add`, `worktree_open`, `worktree_remove`, plus the `*_prompt` pickers.
 - One-key triggers: `ctrl+space>w` (agent picker + name prompt), `ctrl+space>o` (existing worktree picker), `ctrl+space>shift+w` (remove picker); `ctrl+space>]` / `[` cycle sessions. Switch sessions with `ctrl+space>f`.
+- Rename keys follow tmux defaults: `ctrl+space>,` → `client.tab.rename`, `ctrl+space>shift+4` (`$`) → `session.rename`, `ctrl+space>l` → `rename_pane_prompt` (a popup in `init.lua` that runs `rex block rename`).
+- Worktree → session ids live in `~/.local/state/rex/worktree-sessions`, so `worktree_open`/`worktree_remove` still work after a session is renamed.
 - Agents are listed at the top of `worktrees.lua`; the picker shows installed ones, last used first (`~/.local/state/rex/worktree-agent`). The installed list is cached 60s for speed, but the last-used ordering is computed per call.
 - Picker scripts log failures to `~/.local/state/rex/worktree.log` and keep the error on screen until Enter, so failures are diagnosable.
 - **Server-side PATH gotcha**: `rex.exec` inside actions runs with the server's minimal PATH (`/usr/local/bin:/usr/bin:...`), so agent and `rex` lookup go through the user's **login + interactive shell** (`zsh -lic`). Terminal blocks themselves get the normal login-shell PATH.
