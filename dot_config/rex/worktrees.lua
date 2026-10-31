@@ -127,6 +127,64 @@ local function terminal_pane(cwd, label, command)
     }
 end
 
+local rex_bin
+
+-- Windows in one session, via the CLI so the action does not depend on its own
+-- control stream being attached to that session. Each entry carries the window
+-- id, because closing by label is ambiguous when a rerun left two setup tabs.
+local rex_bin
+
+-- Window entries: { id = "window:...", label = "..." }.
+local function window_entries(label)
+    local bin = rex_bin()
+    local entries = {}
+    if bin == nil then
+        return entries
+    end
+    local result = rex.exec({ bin, "window", "ls", "-s", label, "--json" }, { timeout = 10 })
+    if result == nil or not result.ok then
+        return entries
+    end
+
+    local text = result.stdout
+    local start = text:find('"windows"%s*:%s*%[')
+    if start == nil then
+        return entries
+    end
+    local depth = 0
+    local began = nil
+    for index = start, #text do
+        local char = text:sub(index, index)
+        if char == "{" then
+            if depth == 0 then
+                began = index
+            end
+            depth = depth + 1
+        elseif char == "}" then
+            depth = depth - 1
+            if depth == 0 and began ~= nil then
+                local object = text:sub(began, index)
+                local id = object:match('"window_id"%s*:%s*"(window:[^"]+)"')
+                local window_label = object:match('"label"%s*:%s*"([^"]*)"')
+                if id ~= nil and window_label ~= nil then
+                    entries[#entries + 1] = { id = id, label = window_label }
+                end
+                began = nil
+            end
+        end
+    end
+    return entries
+end
+
+local function window_label_present(entries, wanted)
+    for _, entry in ipairs(entries) do
+        if entry.label == wanted then
+            return true
+        end
+    end
+    return false
+end
+
 local function require_root(ctx, action, cwd)
     local first = cwd or context.cwd_of(ctx)
     local tried = {}
@@ -173,7 +231,7 @@ end
 
 -- The rex CLI is not on the server's PATH either; resolve it once.
 local rex_bin_cache = nil
-local function rex_bin()
+rex_bin = function()
     if rex_bin_cache ~= nil then
         return rex_bin_cache
     end
@@ -978,16 +1036,107 @@ local function rollback_add(root, name, path, branch, added_exclude, added_local
     end
 end
 
-local function create_session(root, name, path, spec)
+
+-- Wrap a command so it runs with the workspace env loaded. Terminal blocks have
+-- no env option, so the generated wrapper is the only way to export.
+local function env_command(path, command)
+    local argv = {
+        "sh", "-c",
+        'set -a; . "$1/.workrex/env" 2>/dev/null; set +a; shift; exec "$@"',
+        "workrex-env", path,
+    }
+    for _, item in ipairs(command) do
+        argv[#argv + 1] = item
+    end
+    return argv
+end
+
+local function env_pane(path, label, command)
+    return terminal_pane(path, label, env_command(path, command))
+end
+
+local function setup_pane(path, script)
+    return rex.layout.block {
+        flavor = context.shell,
+        label = "setup",
+        options = {
+            cwd = path,
+            command = { "sh", "-c", script },
+            exit = { on_completion = false },
+        },
+    }
+end
+
+--- The setup window script. Every step prints its command, keeps its output on
+--- screen, and marks the worktree failed before the retry prompt. The agent
+--- window is created by workrex_setup_done, which the pane calls only after
+--- every step succeeded, so a failure can never start an agent.
+local function build_setup_script(cfg, root, path, name, spec)
+    local key = shquote(meta_key(name, "setup"))
+    local lines = {
+        "#!/bin/sh",
+        "set -u",
+        "cd " .. shquote(path) .. " || exit 9",
+        ". ./.workrex/env 2>/dev/null || true",
+        "say() { printf '\\n[workrex] %s\\n' \"$1\"; }",
+        "mark_failed() { git -C " .. shquote(root) .. " config --local " .. key .. " failed 2>/dev/null || true; }",
+        "run_steps() {",
+    }
+
+    local function add_step(kind, cmd)
+        lines[#lines + 1] = "  say " .. shquote(kind .. ": " .. cmd)
+        lines[#lines + 1] = "  sh -c " .. shquote(cmd)
+            .. " || { printf '\\n[workrex] FAILED: %s (exit %s)\\n' " .. shquote(cmd)
+            .. " \"$?\"; mark_failed; return 1; }"
+    end
+
+    for _, cmd in ipairs(cfg.post_create) do
+        add_step("post-create", cmd)
+    end
+    for _, cmd in ipairs(cfg.setup) do
+        add_step("setup", cmd)
+    end
+
+    for _, line in ipairs({
+        "}",
+        "",
+        "ok=0",
+        "while :; do",
+        "  if run_steps; then ok=1; break; fi",
+        "  printf 'fix the problem, press Enter to retry, or Ctrl-D to abandon\\n'",
+        "  read -r _ || break",
+        "done",
+        "if [ \"$ok\" != 1 ]; then exec \"${SHELL:-/bin/sh}\" -l; fi",
+        "git -C " .. shquote(root) .. " config --local " .. key .. " running 2>/dev/null || true",
+        "rex do -s \"$REX_SESSION\" workrex_setup_done name=" .. shquote(name)
+            .. " agent=" .. shquote(spec) .. " cwd=" .. shquote(path),
+        "exec \"${SHELL:-/bin/sh}\" -l",
+    }) do
+        lines[#lines + 1] = line
+    end
+    return table.concat(lines, "\n")
+end
+
+local function create_session(root, name, path, spec, cfg, gated)
     local label = session_label(root, name)
     local command = agent_command(spec)
 
+    local windows
+    if gated then
+        windows = {
+            { window_label = "nvim", layout = env_pane(path, "nvim", editor) },
+            { window_label = "setup", layout = setup_pane(path, build_setup_script(cfg, root, path, name, spec)) },
+        }
+    else
+        windows = {
+            { window_label = "nvim", layout = env_pane(path, "nvim", editor) },
+            { window_label = spec, layout = env_pane(path, spec, command) },
+        }
+    end
+
     local created, err = rex.call("session.create", {
         label = label,
-        initial_windows = {
-            { window_label = "nvim", layout = terminal_pane(path, "nvim", editor) },
-            { window_label = spec, layout = terminal_pane(path, spec, command) },
-        },
+        initial_windows = windows,
     })
     if created == nil then
         error(err, 0)
@@ -1067,7 +1216,8 @@ rex.action {
             error(files_err, 0)
         end
 
-        local ok_session, label_or_err, created = pcall(create_session, root, args.name, path, spec)
+        local ok_session, label_or_err, created = pcall(
+            create_session, root, args.name, path, spec, cfg, setup_state == "running")
         if not ok_session then
             rollback_add(root, args.name, path, branch, added_exclude, added_local_exclude)
             error(label_or_err, 0)
@@ -1110,9 +1260,12 @@ rex.action {
 
         local existing = find_worktree_session(path, label)
         if existing ~= nil then
+            local setup_state = get_meta(root, args.name, "setup") or "skipped"
+            local entries = window_entries(label)
             return { name = args.name, worktree = path, branch = branch, label = label,
                 session_id = existing.session_id, existing = true,
-                setup = get_meta(root, args.name, "setup") or "skipped" }
+                setup = setup_state,
+                abandoned = setup_state == "running" and not window_label_present(entries, "setup") }
         end
 
         if not known_worktrees(root)[path] then
@@ -1122,7 +1275,13 @@ rex.action {
         local spec = args.agent or default_agent()
         ensure_agent_available(spec)
 
-        local _, created = create_session(root, args.name, path, spec)
+        local cfg = load_config(root)
+        local state = get_meta(root, args.name, "setup") or "skipped"
+        local gated = state ~= "ok" and has_steps(cfg)
+        if gated then
+            set_meta(root, args.name, "setup", "running")
+        end
+        local _, created = create_session(root, args.name, path, spec, cfg, gated)
         write_last_agent(spec)
         remember_session(path, created.session_id)
 
@@ -1199,6 +1358,127 @@ rex.action {
     end,
 }
 
+
+-- Release the agent after the setup window reports success. The marker is
+-- written last, so setup == ok implies the agent window exists.
+rex.action {
+    name = "workrex_setup_done",
+    title = "Worktree: Setup done",
+    description = "Add the agent window after setup succeeds. Called by the setup pane.",
+    category = "Worktrees",
+    keywords = "workrex setup done agent gate",
+    args = { name = "string", agent = "string?", cwd = "string?" },
+    run = function(ctx, args)
+        local root = require_root(ctx, "workrex_setup_done", args.cwd)
+        local path = worktree_paths(root, args.name)
+        local label = session_label(root, args.name)
+        if find_worktree_session(path, label) == nil then
+            error("workrex_setup_done: no session for " .. label, 0)
+        end
+        local spec = args.agent or get_meta(root, args.name, "agent") or default_agent()
+        local bin = rex_bin()
+        if bin == nil then
+            error("workrex_setup_done: the rex CLI is not on PATH", 0)
+        end
+
+        local entries = window_entries(label)
+        if window_label_present(entries, spec) then
+            set_meta(root, args.name, "setup", "ok")
+            return { already = true, agent = spec }
+        end
+
+        local command = agent_command(spec)
+        local argv = { bin, "window", "new", "-s", label, spec, "--focus=false", "-c", path, "--" }
+        for _, item in ipairs(env_command(path, command)) do
+            argv[#argv + 1] = item
+        end
+        local added = rex.exec(argv, { timeout = 20 })
+        if added == nil or not added.ok then
+            set_meta(root, args.name, "setup", "failed")
+            error("workrex_setup_done: cannot add the agent window: "
+                .. trim((added and added.stderr) or "rex window new failed"), 0)
+        end
+
+        -- Close the previous agent window only after the new one exists.
+        local previous = get_meta(root, args.name, "agent")
+        if previous ~= nil and previous ~= spec then
+            for _, entry in ipairs(entries) do
+                if entry.label == previous then
+                    rex.exec({ bin, "window", "close", "-s", label, entry.id }, { timeout = 10 })
+                end
+            end
+        end
+
+        set_meta(root, args.name, "agent", spec)
+        set_meta(root, args.name, "setup", "ok")
+        return { agent = spec }
+    end,
+}
+
+-- Rerun setup in a fresh window. Bound to C-space>s.
+rex.action {
+    name = "workrex_setup",
+    title = "Worktree: Rerun setup",
+    description = "Open a fresh setup window for the current worktree and rerun its config.",
+    category = "Worktrees",
+    keywords = "workrex setup rerun retry",
+    args = { name = "string?", cwd = "string?" },
+    run = function(ctx, args)
+        local root = require_root(ctx, "workrex_setup", args.cwd)
+        local name = args.name
+        if name == nil then
+            local cwd = args.cwd or context.cwd_of(ctx)
+            name = cwd and cwd:match("__worktrees/([^/]+)$")
+        end
+        if name == nil or not valid_name(name) then
+            error("workrex_setup: run inside a worktree session or pass name=", 0)
+        end
+
+        local path, branch = worktree_paths(root, name)
+        local cfg = load_config(root)
+        if not has_steps(cfg) then
+            return { name = name, setup = "skipped" }
+        end
+
+        local existing = find_worktree_session(path, session_label(root, name))
+        set_meta(root, name, "setup", "running")
+        local spec = get_meta(root, name, "agent") or default_agent()
+        local script = build_setup_script(cfg, root, path, name, spec)
+
+        if existing ~= nil then
+            if ctx.session_id ~= nil and ctx.session_id ~= existing.session_id then
+                error("workrex_setup: switch to " .. existing.label
+                    .. " first (C-space>f), or run with -s", 0)
+            end
+            -- Replace the previous setup window so reruns do not leave a trail
+            -- of identical tabs. Only close when the label is unambiguous.
+            local bin = rex_bin()
+            if bin == nil then
+                error("workrex_setup: the rex CLI is not on PATH", 0)
+            end
+            for _, entry in ipairs(window_entries(existing.label)) do
+                if entry.label == "setup" then
+                    rex.exec({ bin, "window", "close", "-s", existing.label, entry.id }, { timeout = 10 })
+                end
+            end
+            local argv = { bin, "window", "new", "-s", existing.label, "setup", "-c", path, "--" }
+            for _, item in ipairs({ "sh", "-c", script }) do
+                argv[#argv + 1] = item
+            end
+            local added = rex.exec(argv, { timeout = 20 })
+            if added == nil or not added.ok then
+                error("workrex_setup: cannot open the setup window: "
+                    .. trim((added and added.stderr) or "rex window new failed"), 0)
+            end
+            return { name = name, session_id = existing.session_id, setup = "running" }
+        end
+
+        local label, created = create_session(root, name, path, spec, cfg, true)
+        remember_session(path, created.session_id)
+        return { name = name, label = label, session_id = created.session_id, setup = "running" }
+    end,
+}
+
 ----------------------------------------------------------------------
 -- One-key triggers: floating pickers
 ----------------------------------------------------------------------
@@ -1231,7 +1511,7 @@ rex.action {
             '  read -r _',
             '  exit "$code"',
             'fi',
-            'printf "[%s] add %s (%s) ok\\n" "$(date +%Y-%m-%dT%H:%M:%S)" "$name" "$agent" >> "$3"',
+            'printf "[%s] add %s (%s) ok (setup may still be running)\\n" "$(date +%Y-%m-%dT%H:%M:%S)" "$name" "$agent" >> "$3"',
         }, "\n")
 
         context.popup(
@@ -1333,6 +1613,7 @@ rex.action {
     end,
 }
 
+rex.bind("ctrl+space>s", "workrex_setup")
 rex.bind("ctrl+space>w", "worktree_add_prompt")
 rex.bind("ctrl+space>o", "worktree_open_prompt")
 rex.bind("ctrl+space>shift+w", "worktree_remove_prompt")

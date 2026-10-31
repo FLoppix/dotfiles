@@ -215,6 +215,83 @@ lane_p2() {
   rm -f "$REPO/.workrex.lua" "$REPO/CLAUDE.local.md"
 }
 
+labels_of() { # name
+  rex window ls -s "$(label_for "$1")" --json 2>/dev/null | jq -r '.windows[].label' 2>/dev/null
+}
+
+has_label() { # name label
+  labels_of "$1" | grep -qx "$2"
+}
+
+state_of() { # name
+  git -C "$REPO" config --local --get "workrex.worktree.\"$1\".setup" 2>/dev/null || true
+}
+
+lane_p3() {
+  n=$(name_for p3)
+  write_config 'return { setup = { "echo HELLO; sleep 1" } }'
+  add_wt "$n" || { bad "p3 add" "worktree_add failed"; return; }
+  sleep 3
+  if has_label "$n" "setup"; then ok "p3 setup window"; else bad "p3 setup window" "missing"; fi
+  if has_label "$n" "sh"; then ok "p3 agent window"; else bad "p3 agent window" "missing"; fi
+  assert_eq "p3 state ok" "ok" "$(state_of "$n")"
+
+  n2=$(name_for p3f)
+  write_config 'return { setup = { "false" } }'
+  add_wt "$n2"
+  sleep 2
+  assert_eq "p3 failed state" "failed" "$(state_of "$n2")"
+  if labels_of "$n2" | grep -qx "sh"; then bad "p3 no agent on failure" "agent present"; else ok "p3 no agent on failure"; fi
+
+  # rerun after fixing the config
+  write_config 'return { setup = { "echo FIXED" } }'
+  run_action -s "$(label_for "$n2")" workrex_setup name="$n2" >/dev/null 2>&1
+  sleep 3
+  assert_eq "p3 rerun ok" "ok" "$(state_of "$n2")"
+  if labels_of "$n2" | grep -qx "sh"; then ok "p3 rerun agent"; else bad "p3 rerun agent" "missing"; fi
+  setups=$(labels_of "$n2" | grep -c '^setup$' || true)
+  assert_eq "p3 single setup window" "1" "$setups"
+
+  # double report is idempotent
+  run_action workrex_setup_done name="$n2" agent=sh >/dev/null 2>&1
+  if [ "$(labels_of "$n2" | grep -c '^sh$')" = "1" ]; then ok "p3 double report"; else bad "p3 double report" "duplicate agent"; fi
+
+  # agent change closes the old window
+  printf 'return { setup = {} }\n' >"$REPO/.workrex.lua"
+  run_action workrex_setup_done name="$n2" agent=bash >/dev/null 2>&1
+  if labels_of "$n2" | grep -qx "bash" && ! labels_of "$n2" | grep -qx "sh"; then
+    ok "p3 agent change"
+  else
+    bad "p3 agent change" "$(labels_of "$n2" | tr '\n' ' ')"
+  fi
+
+  # closed setup window is reported as abandoned
+  n3=$(name_for p3c)
+  write_config 'return { setup = { "sleep 20" } }'
+  add_wt "$n3"
+  sleep 1
+  rex window close -s "$(label_for "$n3")" setup >/dev/null 2>&1
+  out=$(run_action worktree_open name="$n3" agent=sh)
+  case "$out" in
+    *'"abandoned":true'*) ok "p3 abandoned detected" ;;
+    *) bad "p3 abandoned detected" "$out" ;;
+  esac
+
+  # no_setup escape hatch
+  n4=$(name_for p3n)
+  write_config 'return { setup = { "sleep 20" } }'
+  if run_action worktree_add name="$n4" agent=sh no_setup=true >/dev/null 2>&1; then ok "p3 no_setup add"; else bad "p3 no_setup add" ""; fi
+  if labels_of "$n4" | grep -qx "sh"; then ok "p3 no_setup agent"; else bad "p3 no_setup agent" "missing"; fi
+  if labels_of "$n4" | grep -qx "setup"; then bad "p3 no_setup window" "setup window exists"; else ok "p3 no_setup window"; fi
+
+  for x in "$n" "$n2" "$n3" "$n4"; do
+    rex kill "$(label_for "$x")" >/dev/null 2>&1 || true
+    remove_wt "$x"
+    cleanup_wt "$x"
+  done
+  rm -f "$REPO/.workrex.lua"
+}
+
 lane_p0_cleanup() {
   if rex ls 2>/dev/null | grep -q "proto/"; then
     bad "p0 no proto sessions" "found proto session"
@@ -228,7 +305,7 @@ case "${1:-all}" in
   p0) reset; lane_p0; lane_p0_duplicate; lane_p0_cleanup ;;
   p1) reset; lane_p1 ;;
   p2) reset; lane_p2 ;;
-  p3) reset; say "p3 lanes not implemented yet" ;;
+  p3) reset; lane_p3 ;;
   p4) reset; say "p4 lanes not implemented yet" ;;
   p5) reset; say "p5 lanes not implemented yet" ;;
   all)
