@@ -1144,6 +1144,235 @@ local function create_session(root, name, path, spec, cfg, gated)
     return label, created
 end
 
+local function default_branch(root)
+    local head = run({ "git", "-C", root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD" }, { timeout = 10 })
+    if head ~= nil and head.ok then
+        local name = trim(head.stdout):gsub("^origin/", "")
+        if name ~= "" then
+            return name
+        end
+    end
+    for _, candidate in ipairs({ "main", "master" }) do
+        local present = run({ "git", "-C", root, "show-ref", "--verify", "--quiet", "refs/heads/" .. candidate }, { timeout = 10 })
+        if present ~= nil and present.ok then
+            return candidate
+        end
+    end
+    return nil
+end
+
+local function worktree_for_branch(root, branch)
+    local result = run({ "git", "-C", root, "worktree", "list", "--porcelain" }, { timeout = 10 })
+    if result == nil or not result.ok then
+        return nil
+    end
+    local path = nil
+    for line in result.stdout:gmatch("[^\n]+") do
+        local worktree = line:match("^worktree (.-)$")
+        if worktree ~= nil then
+            path = worktree
+        elseif line == "branch refs/heads/" .. branch and path ~= nil then
+            return path
+        end
+    end
+    return nil
+end
+
+local function worktree_name(args, cwd)
+    if args.name ~= nil then
+        return args.name
+    end
+    local dir = cwd or ""
+    local name = dir:match("__worktrees/([^/]+)$")
+    if name ~= nil and valid_name(name) then
+        return name
+    end
+    error("workrex: pass name= (not inside a worktree)", 0)
+end
+
+local function has_changes(path)
+    local result = run({ "git", "-C", path, "status", "--porcelain" }, { timeout = 10 })
+    if result == nil or not result.ok then
+        return false
+    end
+    return trim(result.stdout) ~= ""
+end
+
+local function has_tracked_changes(path)
+    local result = run({ "git", "-C", path, "status", "--porcelain" }, { timeout = 10 })
+    if result == nil or not result.ok then
+        return false
+    end
+    for line in result.stdout:gmatch("[^\n]+") do
+        if line:sub(1, 2) ~= "??" then
+            return true
+        end
+    end
+    return false
+end
+
+
+-- Merge a worktree branch into its base. Guards run in the action; hooks and
+-- the merge itself stream in a popup so a slow lint never eats the action.
+rex.action {
+    name = "worktree_merge",
+    title = "Worktree: Merge and clean up",
+    description = "Merge a worktree branch into its base, then remove the worktree.",
+    category = "Worktrees",
+    keywords = "git worktree merge squash rebase cleanup",
+    args = {
+        name = "string?",
+        into = "string?",
+        strategy = "string?",
+        allow_dirty = "boolean?",
+        keep = "boolean?",
+        cwd = "string?",
+    },
+    run = function(ctx, args)
+        local root = require_root(ctx, "worktree_merge", args.cwd)
+        local name = worktree_name(args, args.cwd or context.cwd_of(ctx))
+        local path, branch = worktree_paths(root, name)
+        if path == root then
+            error("worktree_merge: the main worktree has nothing to merge", 0)
+        end
+        if not known_worktrees(root)[path] then
+            error("worktree_merge: " .. path .. " is not a worktree of " .. root, 0)
+        end
+
+        local existing = find_worktree_session(path, session_label(root, name))
+        if existing ~= nil and existing.session_id == ctx.session_id then
+            error("worktree_merge: this worktree is open in the current session; switch sessions first", 0)
+        end
+
+        local cfg = load_config(root)
+        local target = args.into or get_base(root, branch) or default_branch(root)
+        if target == nil then
+            error("worktree_merge: no base branch recorded; pass into=", 0)
+        end
+        if target == branch then
+            error("worktree_merge: cannot merge " .. branch .. " into itself", 0)
+        end
+        local state = get_meta(root, name, "setup")
+        if state == "running" then
+            error("worktree_merge: setup is still running for " .. name .. "; finish it first", 0)
+        end
+
+        local target_path = worktree_for_branch(root, target) or root
+        if has_changes(path) and not args.allow_dirty then
+            error("worktree_merge: uncommitted changes in " .. path .. "; commit them or pass allow_dirty=true", 0)
+        end
+        if has_tracked_changes(target_path) then
+            error("worktree_merge: " .. target_path .. " has tracked changes; commit or stash them", 0)
+        end
+
+        local strategy = args.strategy or cfg.merge_strategy or "merge"
+        if strategy ~= "merge" and strategy ~= "rebase" and strategy ~= "squash" then
+            error("worktree_merge: strategy must be merge, rebase, or squash", 0)
+        end
+
+        local bin = rex_bin()
+        if bin == nil then
+            error("worktree_merge: the rex CLI is not on PATH", 0)
+        end
+
+        local lines = {
+            "#!/bin/bash",
+            "set -u",
+            "fail() { printf '\\n[workrex] MERGE FAILED: %s\\n' \"$1\"; read -r _; exit 1; }",
+            "dirty() { [ -n \"$(git -C \"$1\" status --porcelain)\" ]; }",
+            "tracked() { [ -n \"$(git -C \"$1\" status --porcelain | grep -v '^??' || true)\" ]; }",
+        }
+        local allow = args.allow_dirty and 1 or 0
+        lines[#lines + 1] = "[ " .. allow .. " = 1 ] || ! dirty " .. shquote(path)
+            .. " || fail 'uncommitted changes in " .. path:gsub("'", "") .. "'"
+        lines[#lines + 1] = "! tracked " .. shquote(target_path)
+            .. " || fail 'target has tracked changes'"
+
+        for _, hook in ipairs(cfg.pre_merge) do
+            lines[#lines + 1] = "( cd " .. shquote(path) .. " && . ./.workrex/env 2>/dev/null; sh -c "
+                .. shquote(hook) .. " ) || fail " .. shquote("pre_merge hook failed: " .. hook)
+        end
+
+        if strategy == "rebase" then
+            lines[#lines + 1] = "git -C " .. shquote(path) .. " rebase " .. shquote(target)
+                .. " || { git -C " .. shquote(path) .. " rebase --abort; fail 'rebase conflict; resolve in "
+                .. path:gsub("'", "") .. " and rerun'; }"
+            lines[#lines + 1] = "git -C " .. shquote(target_path) .. " merge --ff-only " .. shquote(branch)
+                .. " || fail 'fast-forward after rebase failed'"
+        elseif strategy == "squash" then
+            lines[#lines + 1] = "git -C " .. shquote(target_path) .. " merge --squash " .. shquote(branch)
+                .. " || { git -C " .. shquote(target_path) .. " reset --hard; fail 'squash conflict'; }"
+            lines[#lines + 1] = "git -C " .. shquote(target_path) .. " commit -m "
+                .. shquote("Merge branch '" .. branch .. "' (squash)") .. " || fail 'squash commit failed'"
+        else
+            lines[#lines + 1] = "git -C " .. shquote(target_path) .. " merge --no-edit " .. shquote(branch)
+                .. " || { git -C " .. shquote(target_path) .. " merge --abort; fail 'conflicts; resolve in "
+                .. path:gsub("'", "") .. " and rerun'; }"
+        end
+
+        lines[#lines + 1] = "printf '\\n[workrex] merged %s into %s\\n' "
+            .. shquote(branch) .. " " .. shquote(target)
+        lines[#lines + 1] = shquote(bin) .. " do worktree_merge_finish name=" .. shquote(name)
+            .. " keep=" .. (args.keep and "true" or "false") .. " cwd=" .. shquote(path)
+        lines[#lines + 1] = "printf '\\n[workrex] done. Press Enter to close.\\n'"
+        lines[#lines + 1] = "read -r _ || true"
+
+        context.popup(ctx, { "bash", "-c", table.concat(lines, "\n") }, "merge " .. name,
+            { 0.1, 0.1, 0.8, 0.8 })
+        return { name = name, into = target, strategy = strategy, started = true }
+    end,
+}
+
+-- Teardown after a successful merge. Runs unscoped from the merge popup, so it
+-- must never touch the caller's session.
+rex.action {
+    name = "worktree_merge_finish",
+    title = "Worktree: Merge finish",
+    description = "Remove a merged worktree, close its session, and delete the branch when merged.",
+    category = "Worktrees",
+    keywords = "workreex merge finish cleanup",
+    args = { name = "string", keep = "boolean?", cwd = "string?" },
+    run = function(ctx, args)
+        local root = require_root(ctx, "worktree_merge_finish", args.cwd)
+        local path, branch = worktree_paths(root, args.name)
+        if args.keep then
+            return { name = args.name, kept = true }
+        end
+
+        local existing = find_worktree_session(path, session_label(root, args.name))
+        local session_killed = false
+        if existing ~= nil and existing.session_id ~= ctx.session_id then
+            local bin = rex_bin()
+            if bin ~= nil then
+                run_ok({ bin, "kill", existing.session_id }, { timeout = 20 })
+                session_killed = true
+            end
+        end
+
+        local parent, project = root:match("^(.*)/([^/]+)$")
+        local trash = (parent or ".") .. "/.workrex-trash-" .. (project or "repo") .. "-" .. args.name
+        if io.open(trash, "r") ~= nil then
+            trash = trash .. "-" .. tostring(os.time())
+        end
+        run_ok({ "mv", path, trash }, { timeout = 20 })
+        run_ok({ "git", "-C", root, "worktree", "prune" }, { timeout = 20 })
+        rex.exec({ "sh", "-c", 'nohup rm -rf "$1" >/dev/null 2>&1 &', "workrex-cleanup", trash }, { timeout = 5 })
+
+        local branch_result = run({ "git", "-C", root, "branch", "-d", branch }, { timeout = 10 })
+        forget_session(path)
+        clear_meta(root, args.name)
+
+        return {
+            name = args.name,
+            worktree = path,
+            branch = branch,
+            session_killed = session_killed,
+            branch_deleted = branch_result ~= nil and branch_result.ok,
+        }
+    end,
+}
+
+
 -- Create a worktree and its session in one go.
 rex.action {
     name = "worktree_add",
@@ -1322,10 +1551,33 @@ rex.action {
         local root = require_root(ctx, "worktree_remove", args.cwd)
         local path, branch = worktree_paths(root, args.name)
         local label = session_label(root, args.name)
+        local cfg = load_config(root)
 
         local existing = find_worktree_session(path, label)
         if existing ~= nil and existing.session_id == ctx.session_id then
             error("worktree_remove: this worktree is open in the current session; switch sessions first", 0)
+        end
+
+        if get_meta(root, args.name, "setup") == "running" and not args.force then
+            error("worktree_remove: setup is still running for " .. args.name
+                .. "; wait for it or pass force=true", 0)
+        end
+        if has_changes(path) and not args.force then
+            error("worktree_remove: uncommitted changes in " .. path
+                .. "; commit them or pass force=true", 0)
+        end
+
+        -- pre_remove hooks run in the live worktree before anything is killed.
+        for _, hook in ipairs(cfg.pre_remove) do
+            local command = "cd " .. shquote(path) .. " && " .. hook
+            run_ok({
+                "env",
+                "WORKREX_WORKSPACE_PATH=" .. path,
+                "WORKREX_ROOT_PATH=" .. root,
+                "WORKREX_WORKSPACE_NAME=" .. args.name,
+                "WORKREX_BRANCH=" .. branch,
+                login_shell(), "-lic", command,
+            }, { timeout = 25 })
         end
 
         if existing ~= nil then
@@ -1336,14 +1588,20 @@ rex.action {
             run_ok({ bin, "kill", existing.session_id }, { timeout = 20 })
         end
 
-        local remove = { "git", "-C", root, "worktree", "remove" }
-        if args.force then
-            remove[#remove + 1] = "--force"
+        -- Quarantine: rename first so a pane still holding the directory cannot
+        -- block removal, then let git prune the stale registration. The trash is
+        -- deleted in the background because node_modules can exceed the budget.
+        local parent, project = root:match("^(.*)/([^/]+)$")
+        local trash = (parent or ".") .. "/.workrex-trash-" .. (project or "repo") .. "-" .. args.name
+        if io.open(trash, "r") ~= nil then
+            trash = trash .. "-" .. tostring(os.time())
         end
-        remove[#remove + 1] = path
-        run_ok(remove, { timeout = 25 })
+        run_ok({ "mv", path, trash }, { timeout = 20 })
+        run_ok({ "git", "-C", root, "worktree", "prune" }, { timeout = 20 })
+        rex.exec({ "sh", "-c", 'nohup rm -rf "$1" >/dev/null 2>&1 &', "workrex-cleanup", trash }, { timeout = 5 })
 
         forget_session(path)
+        clear_meta(root, args.name)
 
         -- The branch only goes when it is already merged.
         local branch_result = run({ "git", "-C", root, "branch", "-d", branch }, { timeout = 10 })
@@ -1353,11 +1611,10 @@ rex.action {
             worktree = path,
             branch = branch,
             session_killed = existing ~= nil,
-            branch_deleted = branch_result.ok,
+            branch_deleted = branch_result ~= nil and branch_result.ok,
         }
     end,
 }
-
 
 -- Release the agent after the setup window reports success. The marker is
 -- written last, so setup == ok implies the agent window exists.
@@ -1478,6 +1735,7 @@ rex.action {
         return { name = name, label = label, session_id = created.session_id, setup = "running" }
     end,
 }
+
 
 ----------------------------------------------------------------------
 -- One-key triggers: floating pickers
@@ -1613,6 +1871,45 @@ rex.action {
     end,
 }
 
+
+rex.action {
+    name = "worktree_merge_prompt",
+    title = "Worktree: Merge (pick)…",
+    description = "Pick a worktree and a strategy, then merge and clean up.",
+    category = "Worktrees",
+    keywords = "git worktree merge picker squash rebase",
+    run = function(ctx)
+        local root = require_root(ctx, "worktree_merge_prompt")
+        local script = table.concat({
+            'cd "$1" || exit 1',
+            'sel=$(git worktree list --porcelain | awk \'/^worktree /{print $2}\' '
+                .. "| grep '__worktrees/' | sed 's#.*/##' | sort "
+                .. "| fzf --prompt='merge worktree> ') || exit 0",
+            '[ -z "$sel" ] && exit 0',
+            'strategy=$(printf "merge\nrebase\nsquash\n" | fzf --prompt="strategy> ") || exit 0',
+            '[ -z "$strategy" ] && exit 0',
+            'mkdir -p "$(dirname "$3")" 2>/dev/null',
+            'out=$(rex do -s "$2" worktree_merge name="$sel" strategy="$strategy" cwd="$1" 2>&1)',
+            'code=$?',
+            'if [ "$code" -ne 0 ]; then',
+            '  printf "[%s] merge %s (%s) failed:\n%s\n" "$(date +%Y-%m-%dT%H:%M:%S)" "$sel" "$strategy" "$out" >> "$3"',
+            '  printf "\n%s\n\nPress Enter to close." "$out"',
+            '  read -r _',
+            '  exit "$code"',
+            'fi',
+            'printf "[%s] merge %s (%s) started\n" "$(date +%Y-%m-%dT%H:%M:%S)" "$sel" "$strategy" >> "$3"',
+        }, "\n")
+
+        context.popup(
+            ctx,
+            { "sh", "-c", script, "worktree-merge", root, ctx.session_id, LOG_FILE },
+            "worktree merge",
+            { 0.2, 0.15, 0.6, 0.5 }
+        )
+    end,
+}
+
+rex.bind("ctrl+space>m", "worktree_merge_prompt")
 rex.bind("ctrl+space>s", "workrex_setup")
 rex.bind("ctrl+space>w", "worktree_add_prompt")
 rex.bind("ctrl+space>o", "worktree_open_prompt")

@@ -292,6 +292,91 @@ lane_p3() {
   rm -f "$REPO/.workrex.lua"
 }
 
+commit_in() { # dir message file
+  printf '%s\n' "$2" >"$1/$3"
+  git -C "$1" add "$3"
+  git -C "$1" -c user.email=smoke@example.com -c user.name=smoke commit -qm "$2"
+}
+
+lane_p4() {
+  # happy path
+  n=$(name_for p4)
+  add_wt "$n"
+  commit_in "$REPO"__worktrees/"$n" feature feat.txt
+  run_action worktree_merge name="$n" strategy=merge >/dev/null 2>&1
+  sleep 5
+  if git -C "$REPO" log --oneline -5 | grep -q feature; then ok "p4 merge landed"; else bad "p4 merge landed" ""; fi
+  assert_no_file "p4 merge removed worktree" "$REPO"__worktrees/"$n"
+  if git -C "$REPO" show-ref --verify --quiet "refs/heads/wm/$n"; then bad "p4 merge deleted branch" "branch exists"; else ok "p4 merge deleted branch"; fi
+  cleanup_wt "$n"
+
+  # conflict keeps the worktree and cleans the target
+  n2=$(name_for p4c)
+  add_wt "$n2"
+  commit_in "$REPO"__worktrees/"$n2" branch-side conflict.txt
+  commit_in "$REPO" main-side conflict.txt
+  run_action worktree_merge name="$n2" >/dev/null 2>&1
+  sleep 5
+  assert_file "p4 conflict keeps worktree" "$REPO"__worktrees/"$n2"
+  if [ -z "$(git -C "$REPO" status --porcelain)" ]; then ok "p4 conflict target clean"; else bad "p4 conflict target clean" "$(git -C "$REPO" status --porcelain)"; fi
+  cleanup_wt "$n2"
+
+  # dirty guard
+  n3=$(name_for p4d)
+  add_wt "$n3"
+  printf 'dirty\n' >>"$REPO"__worktrees/"$n3/tracked.txt"
+  out=$(run_action worktree_merge name="$n3")
+  case "$out" in
+    *"uncommitted changes"*) ok "p4 dirty merge refused" ;;
+    *) bad "p4 dirty merge refused" "$out" ;;
+  esac
+  out=$(run_action worktree_remove name="$n3")
+  case "$out" in
+    *"uncommitted changes"*) ok "p4 dirty remove refused" ;;
+    *) bad "p4 dirty remove refused" "$out" ;;
+  esac
+  run_action worktree_remove name="$n3" force=true >/dev/null 2>&1
+  assert_no_file "p4 force remove" "$REPO"__worktrees/"$n3"
+  cleanup_wt "$n3"
+
+  # self-session guard
+  n4=$(name_for p4s)
+  add_wt "$n4"
+  out=$(run_action -s "$(label_for "$n4")" worktree_merge name="$n4")
+  case "$out" in
+    *"current session"*) ok "p4 self-session refused" ;;
+    *) bad "p4 self-session refused" "$out" ;;
+  esac
+
+  # setup running guard
+  write_config 'return { setup = { "sleep 30" } }'
+  n5=$(name_for p4r)
+  add_wt "$n5"
+  out=$(run_action worktree_merge name="$n5")
+  case "$out" in
+    *"setup is still running"*) ok "p4 running setup refused" ;;
+    *) bad "p4 running setup refused" "$out" ;;
+  esac
+  write_config 'return { setup = {} }'
+
+  # pre_merge hook failure blocks the merge
+  n6=$(name_for p4h)
+  write_config 'return { pre_merge = { "false" } }'
+  add_wt "$n6"
+  commit_in "$REPO"__worktrees/"$n6" hook feature2.txt
+  run_action worktree_merge name="$n6" >/dev/null 2>&1
+  sleep 4
+  assert_file "p4 hook failure keeps worktree" "$REPO"__worktrees/"$n6"
+  if git -C "$REPO" log --oneline -3 | grep -q hook; then bad "p4 hook failure blocked" "merge landed"; else ok "p4 hook failure blocked"; fi
+
+  for x in "$n2" "$n4" "$n5" "$n6"; do
+    rex kill "$(label_for "$x")" >/dev/null 2>&1 || true
+    remove_wt "$x"
+    cleanup_wt "$x"
+  done
+  rm -f "$REPO/.workrex.lua"
+}
+
 lane_p0_cleanup() {
   if rex ls 2>/dev/null | grep -q "proto/"; then
     bad "p0 no proto sessions" "found proto session"
@@ -306,7 +391,7 @@ case "${1:-all}" in
   p1) reset; lane_p1 ;;
   p2) reset; lane_p2 ;;
   p3) reset; lane_p3 ;;
-  p4) reset; say "p4 lanes not implemented yet" ;;
+  p4) reset; lane_p4 ;;
   p5) reset; say "p5 lanes not implemented yet" ;;
   all)
     reset
