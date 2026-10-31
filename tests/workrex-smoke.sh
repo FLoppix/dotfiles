@@ -62,8 +62,7 @@ ensure_driver() {
 }
 
 run_action() { # action args...
-  ensure_driver
-  rex do -s "$(driver)" "$@" 2>&1
+  rex do "$@" cwd="$REPO" 2>&1
 }
 
 add_wt() { # name agent
@@ -112,6 +111,72 @@ lane_p0_duplicate() {
   cleanup_wt "$n"
 }
 
+write_config() { # body
+  printf '%s\n' "$1" >"$REPO/.workrex.lua"
+}
+
+lane_p1() {
+  n=$(name_for p1)
+  write_config 'return { setup = {}, port_block = 10 }'
+  add_wt "$n" || { bad "p1 add" "worktree_add failed"; return; }
+  wt=$REPO"__worktrees/$n"
+  assert_file "p1 env file" "$wt/.workrex/env"
+  assert_eq "p1 base key" "main" "$(git -C "$REPO" config --local --get "branch.\"wm/$n\".workrex-base")"
+  assert_config "p1 setup state" "workrex.worktree.\"$n\".setup" "skipped"
+  envport=$(sed -n "s/^export WORKREX_PORT='\([0-9]*\)'$/\1/p" "$wt/.workrex/env")
+  metaport=$(git -C "$REPO" config --local --get "workrex.worktree.\"$n\".ports")
+  assert_eq "p1 env port matches meta" "$metaport" "$envport"
+
+  n2=$(name_for p1b)
+  add_wt "$n2"
+  port2=$(git -C "$REPO" config --local --get "workrex.worktree.\"$n2\".ports")
+  if [ -n "$envport" ] && [ "$envport" != "$port2" ]; then ok "p1 ports differ"; else bad "p1 ports differ" "$envport vs $port2"; fi
+
+  # config errors abort before any side effect
+  write_config 'return { nope = true }'
+  n3=$(name_for p1c)
+  out=$(run_action worktree_add name="$n3" agent=sh)
+  case "$out" in
+    *"unknown config key"*) ok "p1 unknown key rejected" ;;
+    *) bad "p1 unknown key rejected" "$out" ;;
+  esac
+  assert_no_file "p1 no dir after config error" "$REPO"__worktrees/"$n3"
+
+  write_config 'return { setup = { '
+  out=$(run_action worktree_add name="$n3" agent=sh)
+  case "$out" in
+    *"workrex:"*) ok "p1 syntax error rejected" ;;
+    *) bad "p1 syntax error rejected" "$out" ;;
+  esac
+
+  write_config 'return { setup = {}, port_block = 10 }'
+  lines=$(grep -c '^\.workrex/$' "$REPO/.git/info/exclude" 2>/dev/null || true)
+  assert_eq "p1 exclude once" "1" "$lines"
+
+  # old worktree backfill: drop meta keys, reopen
+  git -C "$REPO" config --local --remove-section "workrex.worktree.\"$n2\"" 2>/dev/null || true
+  rex kill "$(label_for "$n2")" >/dev/null 2>&1 || true
+  open_wt "$n2"
+  assert_config "p1 backfilled setup" "workrex.worktree.\"$n2\".setup" "skipped"
+
+  # rollback when the session label is taken
+  n4=$(name_for p1d)
+  rex new "$(label_for "$n4")" -c "$REPO" >/dev/null 2>&1
+  sleep 1
+  out=$(run_action worktree_add name="$n4" agent=sh)
+  case "$out" in
+    *"already exists"*|*"conflict"*|*"failed"*|*"label"*) ok "p1 rollback reports conflict" ;;
+    *) bad "p1 rollback reports conflict" "$out" ;;
+  esac
+  assert_no_file "p1 rollback removed worktree" "$REPO"__worktrees/"$n4"
+  rex kill "$(label_for "$n4")" >/dev/null 2>&1 || true
+
+  remove_wt "$n"
+  remove_wt "$n2"
+  cleanup_wt "$n"; cleanup_wt "$n2"; cleanup_wt "$n4"
+  rm -f "$REPO/.workrex.lua"
+}
+
 lane_p0_cleanup() {
   if rex ls 2>/dev/null | grep -q "proto/"; then
     bad "p0 no proto sessions" "found proto session"
@@ -123,7 +188,7 @@ lane_p0_cleanup() {
 case "${1:-all}" in
   reset) reset ;;
   p0) reset; lane_p0; lane_p0_duplicate; lane_p0_cleanup ;;
-  p1) reset; say "p1 lanes not implemented yet" ;;
+  p1) reset; lane_p1 ;;
   p2) reset; say "p2 lanes not implemented yet" ;;
   p3) reset; say "p3 lanes not implemented yet" ;;
   p4) reset; say "p4 lanes not implemented yet" ;;

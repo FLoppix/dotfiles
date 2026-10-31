@@ -127,8 +127,8 @@ local function terminal_pane(cwd, label, command)
     }
 end
 
-local function require_root(ctx, action)
-    local first = context.cwd_of(ctx)
+local function require_root(ctx, action, cwd)
+    local first = cwd or context.cwd_of(ctx)
     local tried = {}
 
     local function attempt(dir)
@@ -411,7 +411,400 @@ local function known_worktrees(root)
     return paths
 end
 
--- Create the worktree's session: an nvim window and an agent window.
+-- Workrex config. A repo commits .workrex.lua; .workrex.local.lua overrides it
+-- on one machine. The loader runs with a stripped environment, so a repo config
+-- cannot reach io, os, or require (Rex runs Lua 5.1, hence loadstring/setfenv).
+local CONFIG_KEYS = {
+    base = true,
+    branch_prefix = true,
+    files = true,
+    post_create = true,
+    setup = true,
+    pre_merge = true,
+    pre_remove = true,
+    env = true,
+    port_block = true,
+    merge = true,
+}
+
+local function string_list(value, name)
+    if value == nil then
+        return {}
+    end
+    if type(value) ~= "table" then
+        error("workrex: " .. name .. " must be a list of strings", 0)
+    end
+
+    local out = {}
+    for index, item in ipairs(value) do
+        if type(item) ~= "string" then
+            error("workrex: " .. name .. " entry " .. index .. " is not a string", 0)
+        end
+        out[index] = item
+    end
+    return out
+end
+
+local function merge_tables(base, over)
+    local out = {}
+    for key, value in pairs(base or {}) do
+        out[key] = value
+    end
+    for key, value in pairs(over or {}) do
+        if key == "files" or key == "env" then
+            out[key] = merge_tables(out[key], value)
+        else
+            out[key] = value
+        end
+    end
+    return out
+end
+
+local function load_config_file(path, sandbox)
+    local file = io.open(path, "r")
+    if file == nil then
+        return nil
+    end
+    local source = file:read("*a")
+    file:close()
+
+    local chunk, err = loadstring(source, "@" .. path)
+    if chunk == nil then
+        error("workrex: " .. path .. ": " .. tostring(err), 0)
+    end
+    setfenv(chunk, sandbox)
+
+    local ok, result = pcall(chunk)
+    if not ok then
+        error("workrex: " .. path .. ": " .. tostring(result), 0)
+    end
+    if type(result) ~= "table" then
+        error("workrex: " .. path .. " must return a table", 0)
+    end
+    return result
+end
+
+local function normalize_config(raw, root)
+    for key in pairs(raw) do
+        if not CONFIG_KEYS[key] then
+            error("workrex: unknown config key '" .. key .. "' in " .. root, 0)
+        end
+    end
+
+    local files = raw.files or {}
+    if type(files) ~= "table" then
+        error("workrex: files must be a table", 0)
+    end
+    if files.copy ~= nil and type(files.copy) ~= "table" then
+        error("workrex: files.copy must be a list", 0)
+    end
+    if files.symlink ~= nil and type(files.symlink) ~= "table" then
+        error("workrex: files.symlink must be a list", 0)
+    end
+
+    local env = {}
+    if raw.env ~= nil then
+        if type(raw.env) ~= "table" then
+            error("workrex: env must be a table", 0)
+        end
+        for key, value in pairs(raw.env) do
+            if type(key) ~= "string" or type(value) ~= "string" then
+                error("workrex: env keys and values must be strings", 0)
+            end
+            env[key] = value
+        end
+    end
+
+    local port_block = raw.port_block
+    if port_block == nil then
+        port_block = 10
+    end
+    if type(port_block) ~= "number" or port_block < 0 or port_block > 100 then
+        error("workrex: port_block must be a number between 0 and 100", 0)
+    end
+
+    local strategy = nil
+    if raw.merge ~= nil then
+        if type(raw.merge) ~= "table" then
+            error("workrex: merge must be a table", 0)
+        end
+        strategy = raw.merge.strategy
+        if strategy ~= nil and strategy ~= "merge" and strategy ~= "rebase" and strategy ~= "squash" then
+            error("workrex: merge.strategy must be merge, rebase, or squash", 0)
+        end
+    end
+
+    if raw.base ~= nil and type(raw.base) ~= "string" then
+        error("workrex: base must be a string", 0)
+    end
+    if raw.branch_prefix ~= nil and type(raw.branch_prefix) ~= "string" then
+        error("workrex: branch_prefix must be a string", 0)
+    end
+
+    return {
+        base = raw.base,
+        branch_prefix = raw.branch_prefix or "wm/",
+        files = {
+            copy = string_list(files.copy, "files.copy"),
+            symlink = string_list(files.symlink, "files.symlink"),
+        },
+        post_create = string_list(raw.post_create, "post_create"),
+        setup = string_list(raw.setup, "setup"),
+        pre_merge = string_list(raw.pre_merge, "pre_merge"),
+        pre_remove = string_list(raw.pre_remove, "pre_remove"),
+        env = env,
+        port_block = port_block,
+        merge_strategy = strategy,
+    }
+end
+
+local function load_config(root)
+    local sandbox = {
+        string = string,
+        table = table,
+        math = math,
+        pairs = pairs,
+        ipairs = ipairs,
+        tostring = tostring,
+        tonumber = tonumber,
+        type = type,
+        error = error,
+        assert = assert,
+    }
+
+    local project = load_config_file(root .. "/.workrex.lua", sandbox)
+    local local_config = load_config_file(root .. "/.workrex.local.lua", sandbox)
+    local raw = merge_tables(project or {}, local_config or {})
+    return normalize_config(raw, root)
+end
+
+local function has_steps(cfg)
+    return #cfg.post_create > 0 or #cfg.setup > 0
+end
+
+-- Git config helpers. Subsection names may contain dots (valid_name allows
+-- them), so quote every subsection. branch."wm/x".workrex-base is the form git
+-- reads back with the slash form too.
+local function quote_subsection(name)
+    return '"' .. name:gsub('"', '\\"') .. '"'
+end
+
+local function git_config_get(root, key)
+    local result = rex.exec({ "git", "-C", root, "config", "--local", "--get", key }, { timeout = 10 })
+    if result == nil or not result.ok then
+        return nil
+    end
+    local value = trim(result.stdout)
+    if value == "" then
+        return nil
+    end
+    return value
+end
+
+local function git_config_set(root, key, value)
+    run_ok({ "git", "-C", root, "config", "--local", key, tostring(value) }, { timeout = 10 })
+end
+
+local function meta_key(name, key)
+    return "workrex.worktree." .. quote_subsection(name) .. "." .. key
+end
+
+local function set_meta(root, name, key, value)
+    git_config_set(root, meta_key(name, key), value)
+end
+
+local function get_meta(root, name, key)
+    return git_config_get(root, meta_key(name, key))
+end
+
+local function clear_meta(root, name)
+    rex.exec({
+        "git", "-C", root, "config", "--local", "--remove-section",
+        "workrex.worktree." .. quote_subsection(name),
+    }, { timeout = 10 })
+end
+
+local function branch_base_key(branch)
+    return "branch." .. quote_subsection(branch) .. ".workrex-base"
+end
+
+local function set_base(root, branch, base)
+    git_config_set(root, branch_base_key(branch), base)
+end
+
+local function get_base(root, branch)
+    return git_config_get(root, branch_base_key(branch))
+end
+
+local function current_branch(root)
+    local result = run({ "git", "-C", root, "rev-parse", "--abbrev-ref", "HEAD" }, { timeout = 10 })
+    if result == nil or not result.ok then
+        return nil
+    end
+    local branch = trim(result.stdout)
+    if branch == "" or branch == "HEAD" then
+        return nil
+    end
+    return branch
+end
+
+local function shquote(value)
+    return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
+end
+
+-- Add a pattern to .git/info/exclude once. Returns true when this call added it.
+local function ensure_exclude(root, pattern)
+    local info = run({ "git", "-C", root, "rev-parse", "--git-path", "info/exclude" }, { timeout = 10 })
+    if info == nil or not info.ok then
+        return false
+    end
+    local path = trim(info.stdout)
+    if path:sub(1, 1) ~= "/" then
+        path = root .. "/" .. path
+    end
+
+    local content = ""
+    local file = io.open(path, "r")
+    if file ~= nil then
+        content = file:read("*a")
+        file:close()
+    end
+    for line in content:gmatch("[^\n]+") do
+        if trim(line) == pattern then
+            return false
+        end
+    end
+
+    local out = io.open(path, "a")
+    if out == nil then
+        return false
+    end
+    if content ~= "" and content:sub(-1) ~= "\n" then
+        out:write("\n")
+    end
+    out:write(pattern, "\n")
+    out:close()
+    return true
+end
+
+local function remove_exclude(root, pattern)
+    local info = run({ "git", "-C", root, "rev-parse", "--git-path", "info/exclude" }, { timeout = 10 })
+    if info == nil or not info.ok then
+        return
+    end
+    local path = trim(info.stdout)
+    if path:sub(1, 1) ~= "/" then
+        path = root .. "/" .. path
+    end
+
+    local file = io.open(path, "r")
+    if file == nil then
+        return
+    end
+    local kept = {}
+    for line in file:lines() do
+        if trim(line) ~= pattern then
+            kept[#kept + 1] = line
+        end
+    end
+    file:close()
+
+    local out = io.open(path, "w")
+    if out == nil then
+        return
+    end
+    for _, line in ipairs(kept) do
+        out:write(line, "\n")
+    end
+    out:close()
+end
+
+local function write_env(root, name, path, branch, base, port, cfg)
+    local dir = path .. "/.workrex"
+    rex.exec({ "mkdir", "-p", dir }, { timeout = 5 })
+
+    local values = {
+        WORKREX_WORKSPACE_PATH = path,
+        WORKREX_ROOT_PATH = root,
+        WORKREX_WORKSPACE_NAME = name,
+        WORKREX_BRANCH = branch,
+        WORKREX_BASE_BRANCH = base or "",
+    }
+    if port ~= nil and port > 0 then
+        values.WORKREX_PORT = tostring(port)
+        values.WORKREX_PORTS = tostring(port) .. ":" .. tostring(port + (cfg.port_block or 10) - 1)
+    end
+    for key, value in pairs(cfg.env or {}) do
+        values[key] = value
+    end
+
+    local keys = {}
+    for key in pairs(values) do
+        keys[#keys + 1] = key
+    end
+    table.sort(keys)
+
+    local out = io.open(dir .. "/env", "w")
+    if out == nil then
+        return
+    end
+    out:write("# Generated by workrex. Source this file to load the workspace env.\n")
+    for _, key in ipairs(keys) do
+        out:write("export ", key, "=", shquote(values[key]), "\n")
+    end
+    out:close()
+end
+
+-- First free block of `size` ports at or after the repo counter. The counter
+-- only moves forward, so a removed worktree never hands a live dev server's
+-- ports to a new tree. A /dev/tcp probe catches processes outside workrex.
+local function allocate_ports(root, name, size)
+    if size == nil or size <= 0 then
+        return nil
+    end
+    local start = tonumber(git_config_get(root, "workrex.ports.next") or "") or 31000
+
+    local script = table.concat({
+        "base=$1; size=$2",
+        "for i in $(seq 1 50); do",
+        "  free=1; p=$base",
+        "  while [ $p -lt $((base+size)) ]; do",
+        "    if (exec 3<>/dev/tcp/127.0.0.1/$p) 2>/dev/null; then free=0; exec 3>&-; break; fi",
+        "    p=$((p+1))",
+        "  done",
+        "  if [ $free -eq 1 ]; then echo $base; exit 0; fi",
+        "  base=$((base+size))",
+        "done",
+        "exit 1",
+    }, "\n")
+
+    local result = run({ "bash", "-c", script, "workrex-ports", tostring(start), tostring(size) }, { timeout = 10 })
+    if result == nil or not result.ok then
+        return nil
+    end
+    local port = tonumber(trim(result.stdout))
+    if port == nil then
+        return nil
+    end
+
+    git_config_set(root, "workrex.ports.next", port + size)
+    set_meta(root, name, "ports", port)
+    return port
+end
+
+local function rollback_add(root, name, path, branch, added_exclude, added_local_exclude)
+    rex.exec({ "git", "-C", root, "worktree", "remove", "--force", path }, { timeout = 20 })
+    rex.exec({ "git", "-C", root, "branch", "-D", branch }, { timeout = 10 })
+    clear_meta(root, name)
+    rex.exec({ "git", "-C", root, "config", "--local", "--unset", branch_base_key(branch) }, { timeout = 10 })
+    if added_exclude then
+        remove_exclude(root, ".workrex/")
+    end
+    if added_local_exclude then
+        remove_exclude(root, ".workrex.local.lua")
+    end
+end
+
 local function create_session(root, name, path, spec)
     local label = session_label(root, name)
     local command = agent_command(spec)
@@ -436,35 +829,74 @@ rex.action {
     description = "Create a git worktree and open it as a session with nvim and an agent window.",
     category = "Worktrees",
     keywords = "git worktree workmux session nvim agent parallel",
-    args = { name = "string", agent = "string?", base = "string?" },
+    args = { name = "string", agent = "string?", base = "string?", cwd = "string?", no_setup = "boolean?" },
     run = function(ctx, args)
         if not valid_name(args.name) then
             error("worktree_add: use only letters, digits, dots, dashes, and underscores", 0)
         end
 
-        local root = require_root(ctx, "worktree_add")
+        local root = require_root(ctx, "worktree_add", args.cwd)
+        local cfg = load_config(root)
         local path, branch = worktree_paths(root, args.name)
         local label = session_label(root, args.name)
         if find_worktree_session(path, label) ~= nil then
             error("worktree_add: session " .. label .. " already exists; use worktree_open instead", 0)
         end
+        if known_worktrees(root)[path] or io.open(path .. "/.git", "r") ~= nil then
+            error("worktree_add: " .. path .. " already exists; use worktree_open instead", 0)
+        end
+
         local spec = args.agent or default_agent()
         ensure_agent_available(spec)
 
-        run_ok({
-            "git", "-C", root, "worktree", "add", "-b", branch, path, args.base or "HEAD",
-        }, { timeout = 25 })
+        local base = args.base or cfg.base
+        if base == nil then
+            base = current_branch(root)
+            if base == nil then
+                error("worktree_add: detached HEAD; pass base=", 0)
+            end
+        end
 
-        local ok, label_or_err, created = pcall(create_session, root, args.name, path, spec)
+        -- Record the base before the checkout, so a failure mid-add still
+        -- leaves the merge target on record.
+        set_base(root, branch, base)
+        local added_exclude = ensure_exclude(root, ".workrex/")
+        local added_local_exclude = ensure_exclude(root, ".workrex.local.lua")
+
+        local ok, add_err = pcall(function()
+            run_ok({
+                "git", "-C", root, "worktree", "add", "-b", branch, path, base,
+            }, { timeout = 20 })
+        end)
         if not ok then
-            -- Undo the fresh worktree so a failed session leaves nothing behind.
-            rex.exec({ "git", "-C", root, "worktree", "remove", "--force", path }, { timeout = 20 })
-            rex.exec({ "git", "-C", root, "branch", "-D", branch }, { timeout = 10 })
+            rex.exec({ "git", "-C", root, "config", "--local", "--unset", branch_base_key(branch) }, { timeout = 10 })
+            if added_exclude then remove_exclude(root, ".workrex/") end
+            if added_local_exclude then remove_exclude(root, ".workrex.local.lua") end
+            error(add_err, 0)
+        end
+
+        local setup_state = "skipped"
+        if has_steps(cfg) and not args.no_setup then
+            setup_state = "running"
+        end
+
+        set_meta(root, args.name, "base", base)
+        set_meta(root, args.name, "created", os.date("!%Y-%m-%dT%H:%M:%SZ"))
+        set_meta(root, args.name, "agent", spec)
+        set_meta(root, args.name, "setup", setup_state)
+
+        local port = allocate_ports(root, args.name, cfg.port_block)
+        write_env(root, args.name, path, branch, base, port, cfg)
+
+        local ok_session, label_or_err, created = pcall(create_session, root, args.name, path, spec)
+        if not ok_session then
+            rollback_add(root, args.name, path, branch, added_exclude, added_local_exclude)
             error(label_or_err, 0)
         end
 
         write_last_agent(spec)
         remember_session(path, created.session_id)
+        set_meta(root, args.name, "session-id", created.session_id)
 
         return {
             name = args.name,
@@ -473,6 +905,9 @@ rex.action {
             label = label_or_err,
             session_id = created.session_id,
             windows = created.initial_windows,
+            base = base,
+            port = port or 0,
+            setup = setup_state,
         }
     end,
 }
@@ -484,20 +919,21 @@ rex.action {
     description = "Open an existing worktree as a session, or return its live session.",
     category = "Worktrees",
     keywords = "git worktree open session switch existing",
-    args = { name = "string", agent = "string?" },
+    args = { name = "string", agent = "string?", cwd = "string?" },
     run = function(ctx, args)
         if not valid_name(args.name) then
             error("worktree_open: use only letters, digits, dots, dashes, and underscores", 0)
         end
 
-        local root = require_root(ctx, "worktree_open")
+        local root = require_root(ctx, "worktree_open", args.cwd)
         local path, branch = worktree_paths(root, args.name)
         local label = session_label(root, args.name)
 
         local existing = find_worktree_session(path, label)
         if existing ~= nil then
             return { name = args.name, worktree = path, branch = branch, label = label,
-                session_id = existing.session_id, existing = true }
+                session_id = existing.session_id, existing = true,
+                setup = get_meta(root, args.name, "setup") or "skipped" }
         end
 
         if not known_worktrees(root)[path] then
@@ -511,6 +947,15 @@ rex.action {
         write_last_agent(spec)
         remember_session(path, created.session_id)
 
+        -- Backfill state for worktrees created before workrex existed.
+        if get_meta(root, args.name, "agent") == nil then
+            set_meta(root, args.name, "agent", spec)
+        end
+        if get_meta(root, args.name, "setup") == nil then
+            set_meta(root, args.name, "setup", "skipped")
+        end
+        set_meta(root, args.name, "session-id", created.session_id)
+
         return {
             name = args.name,
             worktree = path,
@@ -519,6 +964,7 @@ rex.action {
             session_id = created.session_id,
             windows = created.initial_windows,
             existing = false,
+            setup = get_meta(root, args.name, "setup") or "skipped",
         }
     end,
 }
@@ -529,13 +975,13 @@ rex.action {
     description = "Remove a worktree, close its session, and delete the branch when it is merged.",
     category = "Worktrees",
     keywords = "git worktree remove cleanup session merged kill",
-    args = { name = "string", force = "boolean?" },
+    args = { name = "string", force = "boolean?", cwd = "string?" },
     run = function(ctx, args)
         if not valid_name(args.name) then
             error("worktree_remove: use only letters, digits, dots, dashes, and underscores", 0)
         end
 
-        local root = require_root(ctx, "worktree_remove")
+        local root = require_root(ctx, "worktree_remove", args.cwd)
         local path, branch = worktree_paths(root, args.name)
         local label = session_label(root, args.name)
 
