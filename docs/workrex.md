@@ -251,9 +251,9 @@ args: name, agent
 3. DEDUP: `rex window ls -s <label> --json`; if a window labeled <agent> exists → { already = true };
    if a window labeled with the PREVIOUS agent exists → close it (`rex window close`) first
 4. agent = agent_command(spec) (:104–115)  — window focus = false
-5. session.new_window { session_id, window_label = spec, focus = false,
-      layout = env-wrapped agent block (§6.1) }   — requires the action to run scoped
-      with `rex do -s "$REX_SESSION"` (verified: an unscoped call returns 409)
+5. add the agent window with `rex window new -s <label> <spec> --focus=false -c <path> -- <wrapped agent>`.
+      The API call `session.new_window` returns 409 unless the control stream is attached
+      to that session, so the action uses the CLI path through `rex_bin()` instead
 6. set_meta(setup, "ok")   — LAST, after the window provably exists
 ```
 

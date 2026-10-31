@@ -37,6 +37,8 @@
 │       ├── init.lua         → ~/.config/rex/init.lua (bindings, popups)
 │       ├── context.lua      → Shared cwd/block helpers
 │       └── worktrees.lua    → Worktree tab actions
+├── tests/
+│   └── workrex-smoke.sh   → live smoke test for the worktree flow (not deployed)
 ├── install.sh             → Bootstrap script for new machines
 └── README.md              → Human docs
 ```
@@ -92,6 +94,12 @@
 - After editing: `chezmoi apply ~/.config/rex`, then `rex config check` and `rex config reload`. Rex does not watch the file.
 - If `~/.config/rex` doesn't exist yet, `mkdir -p ~/.config/rex` before applying a single target.
 - Verify the loaded bindings with `rex keymap` and the actions with `rex actions`.
+- Per-repo config is `<repo>/.workrex.lua` plus an optional `.workrex.local.lua`. The loader uses `loadstring` + `setfenv` because Rex runs Lua 5.1, and the chunk has no `io`, `os`, or `require`. Defaults when the file is absent are `files.copy = { ".env*" }` and no setup.
+- Setup and `post_create` run in a `setup` window of the worktree session, streamed. The agent window is added by `workrex_setup_done` only after every step succeeds, and `workrex.worktree."<name>".setup` is written `ok` last. `C-space>s` reruns setup. `workrex_fix` heals a missing setup or agent window.
+- Lifecycle state lives in git config, not a state file: `branch.<branch>.workrex-base` (written before `git worktree add`) and `workrex.worktree."<name>".{base,agent,setup,ports,session-id,created}`. Quote subsections that contain dots.
+- `worktree_merge` guards a dirty source and target, a running setup, and the current session, then runs hooks plus merge/rebase/squash in a popup and calls `worktree_merge_finish` for teardown. `worktree_remove` refuses uncommitted changes and a running setup unless `force=true`, quarantines the directory, prunes, and deletes the trash in the background.
+- `workrex.lua` helpers stay file-local on purpose. A separate module would have to export or duplicate them.
+- The smoke test is `./tests/workrex-smoke.sh p0` through `p5`, or `all`. It drives the real Rex server against a scratch repo and cleans up its sessions.
 - Actions have ~30s to finish: keep `rex.exec` calls short; long setup work belongs in a pane.
 
 ## Common Tasks
@@ -109,6 +117,10 @@
 | Add worktree session | `C-space + w`, or `rex do worktree_add name=foo` |
 | Open worktree session | `C-space + o`, or `rex do worktree_open name=foo` |
 | Remove worktree session | `C-space + W`, or `rex do worktree_remove name=foo` |
+| Merge worktree | `C-space + m`, or `rex do worktree_merge name=foo` |
+| Rerun setup | `C-space + s`, or `rex do workrex_setup name=foo` |
+| Heal worktree state | `rex do workrex_fix name=foo` |
+| Run workrex smoke test | `./tests/workrex-smoke.sh all` |
 | List sessions | `rex ls` |
 | Update from remote | `chezmoi update` |
 

@@ -1737,6 +1737,94 @@ rex.action {
 }
 
 
+
+-- Diagnose and heal the three states workrex can leave behind.
+rex.action {
+    name = "workrex_fix",
+    title = "Worktree: Fix state",
+    description = "Diagnose a worktree whose setup or agent window went missing, and heal it.",
+    category = "Worktrees",
+    keywords = "workrex fix heal setup agent session",
+    args = { name = "string?", cwd = "string?" },
+    run = function(ctx, args)
+        local root = require_root(ctx, "workrex_fix", args.cwd)
+        local name = args.name
+        if name == nil then
+            local cwd = args.cwd or context.cwd_of(ctx)
+            name = cwd and cwd:match("__worktrees/([^/]+)$")
+        end
+        if name == nil or not valid_name(name) then
+            error("workrex_fix: run inside a worktree session or pass name=", 0)
+        end
+
+        local path, branch = worktree_paths(root, name)
+        local label = session_label(root, name)
+        local cfg = load_config(root)
+        local state = get_meta(root, name, "setup") or "skipped"
+        local spec = get_meta(root, name, "agent") or default_agent()
+        local bin = rex_bin()
+        if bin == nil then
+            error("workrex_fix: the rex CLI is not on PATH", 0)
+        end
+
+        local existing = find_worktree_session(path, label)
+        if existing == nil then
+            local gated = state == "failed" or (state == "running" and has_steps(cfg))
+            if gated then
+                set_meta(root, name, "setup", "running")
+            end
+            local _, created = create_session(root, name, path, spec, cfg, gated)
+            remember_session(path, created.session_id)
+            set_meta(root, name, "session-id", created.session_id)
+            return { name = name, healed = "session", session_id = created.session_id }
+        end
+
+        local entries = window_entries(label)
+        local has_setup = window_label_present(entries, "setup")
+        local has_agent = window_label_present(entries, spec)
+
+        if state == "running" and not has_setup then
+            local script = build_setup_script(cfg, root, path, name, spec)
+            local argv = { bin, "window", "new", "-s", label, "setup", "-c", path, "--", "sh", "-c", script }
+            local added = rex.exec(argv, { timeout = 20 })
+            if added == nil or not added.ok then
+                error("workrex_fix: cannot open the setup window", 0)
+            end
+            return { name = name, healed = "setup-window", state = "running" }
+        end
+
+        if state == "failed" then
+            local script = build_setup_script(cfg, root, path, name, spec)
+            set_meta(root, name, "setup", "running")
+            local argv = { bin, "window", "new", "-s", label, "setup", "-c", path, "--", "sh", "-c", script }
+            local added = rex.exec(argv, { timeout = 20 })
+            if added == nil or not added.ok then
+                error("workrex_fix: cannot open the setup window", 0)
+            end
+            return { name = name, healed = "setup-window", state = "running" }
+        end
+
+        if not has_agent then
+            local before = {}
+            for _, entry in ipairs(entries) do
+                before[entry.label] = true
+            end
+            local command = agent_command(spec)
+            local argv = { bin, "window", "new", "-s", label, spec, "--focus=false", "-c", path, "--" }
+            for _, item in ipairs(env_command(path, command)) do
+                argv[#argv + 1] = item
+            end
+            local added = rex.exec(argv, { timeout = 20 })
+            if added == nil or not added.ok then
+                error("workrex_fix: cannot add the agent window", 0)
+            end
+            return { name = name, healed = "agent-window", state = state }
+        end
+
+        return { name = name, healed = "none", state = state }
+    end,
+}
+
 ----------------------------------------------------------------------
 -- One-key triggers: floating pickers
 ----------------------------------------------------------------------
@@ -1796,10 +1884,11 @@ rex.action {
             'entries=""',
             'for p in $(git worktree list --porcelain | awk \'/^worktree /{print $2}\' | grep \'__worktrees/\'); do',
             '  n=$(basename "$p")',
+            '  st=$(git -C "$1" config --local --get "workrex.worktree.\\"$n\\".setup" 2>/dev/null || true)',
             '  if printf \'%s\\n\' "$labels" | grep -qx "$4/$n"; then',
-            '    entries="${entries}${n}    [session]\\n"',
+            '    entries="${entries}${n}    [session${st:+ · $st}]\\n"',
             '  else',
-            '    entries="${entries}${n}\\n"',
+            '    entries="${entries}${n}${st:+    [$st]}\\n"',
             '  fi',
             "done",
             'sel=$(printf "%b" "$entries" | fzf --prompt="worktree> ") || exit 0',

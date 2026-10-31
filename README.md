@@ -156,6 +156,8 @@ Rex keeps its own defaults; the prefix sequences below mirror the tmux workflow.
 | `C-space + t` | worktree switch popup |
 | `C-space + w` | New worktree session (agent + name prompt) |
 | `C-space + o` | Open worktree session (fzf picker) |
+| `C-space + m` | Merge a worktree, then clean it up |
+| `C-space + s` | Rerun setup in the current worktree |
 | `C-space + W` | Remove worktree session (fzf picker) |
 | `C-space + r` | Reload Rex config |
 | `C-space + C-space` | Send a literal `C-space` to the terminal |
@@ -166,11 +168,10 @@ Rex keeps its own defaults; the prefix sequences below mirror the tmux workflow.
 ## Worktree sessions (workmux-style)
 
 `dot_config/rex/worktrees.lua` gives Rex a workmux-like flow: **one git
-worktree per session**, named `<project>/<name>` (e.g. `dotfiles/stripe-fix`),
-with two windows:
-
-- `nvim` — Neovim in the worktree
-- `<agent>` — pi / claude / codex / opencode / amp (active window)
+worktree per session**, named `<project>/<name>` (e.g. `dotfiles/stripe-fix`).
+A session opens with an `nvim` window and an agent window for pi / claude /
+codex / opencode / amp. When the repository configures setup steps, a `setup`
+window runs them first and the agent window opens only after they succeed.
 
 Switch between worktrees with the session picker (`C-space + f`) or
 `C-space + ]` / `[`. Agents are configured at the top of `worktrees.lua`; the
@@ -194,9 +195,59 @@ rex do worktree_remove name=my-feature
 rex do worktree_remove name=my-feature force=true   # discard changes
 ```
 
+Merge and recover:
+
+```bash
+# Merge into the recorded base, then remove the worktree and its session
+rex do worktree_merge name=my-feature
+rex do worktree_merge name=my-feature strategy=squash
+rex do worktree_merge name=my-feature into=release allow_dirty=true keep=true
+
+# Diagnose a stuck setup or a missing agent window
+rex do workrex_fix name=my-feature
+```
+
+### Per-repo setup: `.workrex.lua`
+
+Commit a `.workrex.lua` at the repository root. It is optional, and a missing
+file keeps the old two-window behavior plus a default `.env*` copy.
+
+```lua
+return {
+  base = "origin/main",
+  files = {
+    copy = { ".env*" },          -- gitignored files copied from the main checkout
+    symlink = { "node_modules" }, -- relative links back into the main checkout
+  },
+  setup = { "pnpm install" },     -- runs in the setup window, streamed
+  post_create = { "pnpm run codegen" },
+  pre_merge = { "pnpm typecheck" },
+  pre_remove = { "rm -rf ../cache/$WORKREX_WORKSPACE_NAME" },
+  port_block = 10,                -- WORKREX_PORT .. WORKREX_PORT + 9
+}
+```
+
+The loader runs with a stripped Lua environment, so a repository config cannot
+read `io`, `os`, or `require`. Both `setup` and `post_create` run in the setup
+window, which stays open with a retry prompt when a step fails. The agent window
+opens only after every step succeeds. `C-space + s` reruns setup in a fresh
+window. A `.workrex.local.lua` overrides the committed file on one machine and
+is added to `.git/info/exclude` automatically.
+
+Every worktree gets `WORKREX_WORKSPACE_PATH`, `WORKREX_ROOT_PATH`,
+`WORKREX_WORKSPACE_NAME`, `WORKREX_BRANCH`, `WORKREX_BASE_BRANCH`, and
+`WORKREX_PORT` (plus `WORKREX_PORTS`) in `.workrex/env`, exported into each
+window. Source that file from a shell you open later.
+
 Notes:
 
 - Worktrees live beside the repo in `<project>__worktrees/`; branches are `wm/<name>`.
+- Lifecycle state lives in git config: `branch.<branch>.workrex-base` and
+  `workrex.worktree."<name>".*`.
+- `worktree_merge` refuses a dirty source, a dirty target, a running setup, and
+  merging from inside the worktree's own session.
+- `worktree_remove` refuses uncommitted changes and a running setup unless
+  `force=true`. It keeps an unmerged branch.
 - Running an action from inside another worktree still targets the main checkout
   (it reads `git worktree list`).
 - Removing the worktree you are currently in is refused: switch sessions first.

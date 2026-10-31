@@ -377,6 +377,57 @@ lane_p4() {
   rm -f "$REPO/.workrex.lua"
 }
 
+window_id_of() { # name label
+  rex window ls -s "$(label_for "$1")" --json 2>/dev/null     | jq -r --arg l "$2" '.windows[] | select(.label == $l) | .window_id' 2>/dev/null | head -1
+}
+
+lane_p5() {
+  # failed setup is healed by rerunning it
+  n=$(name_for p5)
+  write_config 'return { setup = { "false" } }'
+  add_wt "$n"
+  sleep 2
+  assert_eq "p5 failed state" "failed" "$(state_of "$n")"
+  write_config 'return { setup = { "echo FIXED" } }'
+  run_action workrex_fix name="$n" >/dev/null 2>&1
+  sleep 3
+  assert_eq "p5 fix reruns setup" "ok" "$(state_of "$n")"
+  if labels_of "$n" | grep -qx "sh"; then ok "p5 fix agent"; else bad "p5 fix agent" "missing"; fi
+
+  # ok state with a missing agent window is healed without rerunning setup
+  wid=$(window_id_of "$n" sh)
+  rex window close -s "$(label_for "$n")" "$wid" >/dev/null 2>&1
+  if labels_of "$n" | grep -qx "sh"; then bad "p5 agent closed" "still present"; else ok "p5 agent closed"; fi
+  run_action workrex_fix name="$n" >/dev/null 2>&1
+  sleep 1
+  if labels_of "$n" | grep -qx "sh"; then ok "p5 fix agent window"; else bad "p5 fix agent window" "missing"; fi
+
+  # idempotent when nothing is wrong
+  out=$(run_action workrex_fix name="$n" 2>&1)
+  case "$out" in
+    *'"healed":"none"'*) ok "p5 fix idempotent" ;;
+    *) bad "p5 fix idempotent" "$out" ;;
+  esac
+
+  # running state with no setup window is healed
+  n2=$(name_for p5r)
+  write_config 'return { setup = { "sleep 30" } }'
+  add_wt "$n2"
+  sleep 1
+  sid=$(window_id_of "$n2" setup)
+  rex window close -s "$(label_for "$n2")" "$sid" >/dev/null 2>&1
+  run_action workrex_fix name="$n2" >/dev/null 2>&1
+  sleep 1
+  if labels_of "$n2" | grep -qx "setup"; then ok "p5 fix setup window"; else bad "p5 fix setup window" "missing"; fi
+
+  for x in "$n" "$n2"; do
+    rex kill "$(label_for "$x")" >/dev/null 2>&1 || true
+    remove_wt "$x"
+    cleanup_wt "$x"
+  done
+  rm -f "$REPO/.workrex.lua"
+}
+
 lane_p0_cleanup() {
   if rex ls 2>/dev/null | grep -q "proto/"; then
     bad "p0 no proto sessions" "found proto session"
@@ -392,11 +443,16 @@ case "${1:-all}" in
   p2) reset; lane_p2 ;;
   p3) reset; lane_p3 ;;
   p4) reset; lane_p4 ;;
-  p5) reset; say "p5 lanes not implemented yet" ;;
+  p5) reset; lane_p5 ;;
   all)
     reset
     lane_p0
     lane_p0_duplicate
+    lane_p1
+    lane_p2
+    lane_p3
+    lane_p4
+    lane_p5
     lane_p0_cleanup
     ;;
   *) say "usage: $0 [reset|p0|p1|p2|p3|p4|p5|all]"; exit 2 ;;
