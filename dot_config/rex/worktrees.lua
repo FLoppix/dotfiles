@@ -544,6 +544,7 @@ local function normalize_config(raw, root)
     return {
         base = raw.base,
         branch_prefix = raw.branch_prefix or "wm/",
+        files_given = raw.files ~= nil,
         files = {
             copy = string_list(files.copy, "files.copy"),
             symlink = string_list(files.symlink, "files.symlink"),
@@ -650,6 +651,178 @@ end
 
 local function shquote(value)
     return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
+end
+
+--- Glob matching for file rules. `*` stays within one segment, `**` crosses
+--- segments, and `?` matches one character.
+local function glob_to_pattern(glob)
+    local out = { "^" }
+    local index = 1
+    while index <= #glob do
+        local char = glob:sub(index, index)
+        if char == "*" then
+            if glob:sub(index + 1, index + 1) == "*" then
+                out[#out + 1] = ".*"
+                index = index + 1
+                if glob:sub(index + 1, index + 1) == "/" then
+                    index = index + 1
+                end
+            else
+                out[#out + 1] = "[^/]*"
+            end
+        elseif char == "?" then
+            out[#out + 1] = "[^/]"
+        elseif char:match("[%^%$%(%)%%%.%[%]%+%-]") then
+            out[#out + 1] = "%" .. char
+        else
+            out[#out + 1] = char
+        end
+        index = index + 1
+    end
+    out[#out + 1] = "$"
+    return table.concat(out)
+end
+
+local function list_ignored(root)
+    local result = run({
+        "git", "-C", root, "ls-files", "--others", "--ignored", "--exclude-standard", "-z",
+    }, { timeout = 10 })
+    local paths = {}
+    if result == nil or not result.ok then
+        return paths
+    end
+    for path in result.stdout:gmatch("([^%z]+)%z") do
+        paths[#paths + 1] = path
+    end
+    return paths
+end
+
+local function split_path(path)
+    local parts = {}
+    for part in path:gmatch("[^/]+") do
+        parts[#parts + 1] = part
+    end
+    return parts
+end
+
+-- Relative path from one directory to a file or directory inside the repo.
+local function relative_path(from_dir, to_path)
+    local from = split_path(from_dir)
+    local to = split_path(to_path)
+    local shared = 0
+    while shared + 1 <= #from and shared + 1 <= #to - 1 and from[shared + 1] == to[shared + 1] do
+        shared = shared + 1
+    end
+
+    local out = {}
+    for _ = shared + 1, #from do
+        out[#out + 1] = ".."
+    end
+    for index = shared + 1, #to do
+        out[#out + 1] = to[index]
+    end
+    return table.concat(out, "/")
+end
+
+local function copy_rules(cfg)
+    if cfg.files_given then
+        return cfg.files.copy
+    end
+    return { ".env*" }
+end
+
+local function symlink_rules(cfg)
+    return cfg.files.symlink
+end
+
+--- Copy and relative-symlink gitignored files from the main checkout into a
+--- fresh worktree. Idempotent: an existing destination is left alone.
+local function apply_file_rules(root, path, cfg)
+    local patterns = {}
+    for _, pattern in ipairs(copy_rules(cfg)) do
+        if pattern:find("%.%.", 1) or pattern:sub(1, 1) == "/" then
+            error("workrex: file pattern escapes the repo: " .. pattern, 0)
+        end
+        patterns[#patterns + 1] = {
+            pattern = glob_to_pattern(pattern),
+            literal = pattern:find("[*?]") == nil and pattern or nil,
+            mode = "copy",
+        }
+    end
+    for _, pattern in ipairs(symlink_rules(cfg)) do
+        if pattern:find("%.%.", 1) or pattern:sub(1, 1) == "/" then
+            error("workrex: file pattern escapes the repo: " .. pattern, 0)
+        end
+        patterns[#patterns + 1] = {
+            pattern = glob_to_pattern(pattern),
+            literal = pattern:find("[*?]") == nil and pattern or nil,
+            mode = "symlink",
+        }
+    end
+
+    if #patterns == 0 then
+        return false
+    end
+
+    local lines = {}
+    local seen = {}
+    local matched = 0
+    for _, rel in ipairs(list_ignored(root)) do
+        for _, rule in ipairs(patterns) do
+            local hit = rel:match(rule.pattern)
+            if hit == nil and rule.literal ~= nil and rel:sub(1, #rule.literal + 1) == rule.literal .. "/" then
+                hit = rule.literal
+            end
+            if hit ~= nil and not seen[hit] then
+                seen[hit] = true
+                matched = matched + 1
+                if matched > 200 then
+                    return false, "workrex: more than 200 files match the file rules; narrow them"
+                end
+
+                local source = root .. "/" .. hit
+                local dest = path .. "/" .. hit
+                local parent = dest:match("^(.*)/[^/]+$")
+                lines[#lines + 1] = "mkdir -p " .. shquote(parent)
+                if rule.mode == "copy" then
+                    lines[#lines + 1] = "[ -e " .. shquote(dest) .. " ] || cp -pR "
+                        .. shquote(source) .. " " .. shquote(dest) .. " || exit 1"
+                else
+                    local target = relative_path(parent, source)
+                    lines[#lines + 1] = "[ -e " .. shquote(dest) .. " ] || [ -L " .. shquote(dest)
+                        .. " ] || ln -s " .. shquote(target) .. " " .. shquote(dest) .. " || exit 1"
+                end
+                break
+            end
+        end
+    end
+
+    -- workmux also links CLAUDE.local.md when the repo ignores it.
+    local local_md = root .. "/CLAUDE.local.md"
+    local md_file = io.open(local_md, "r")
+    if md_file ~= nil then
+        md_file:close()
+        local ignored = run({ "git", "-C", root, "check-ignore", "-q", "CLAUDE.local.md" }, { timeout = 10 })
+        local dest = path .. "/CLAUDE.local.md"
+        if ignored ~= nil and ignored.ok then
+            lines[#lines + 1] = "[ -e " .. shquote(dest) .. " ] || [ -L " .. shquote(dest)
+                .. " ] || ln -s " .. shquote(relative_path(path, local_md)) .. " " .. shquote(dest)
+        end
+    end
+
+    if #lines == 0 then
+        return false
+    end
+
+    local script = table.concat(lines, "\n")
+    local result = rex.exec({ "bash", "-c", script, "workrex-fileops" }, { timeout = 8 })
+    if result == nil then
+        return false, "workrex: file rules failed to run"
+    end
+    if not result.ok then
+        return false, "workrex: file rules failed: " .. trim(result.stderr or "")
+    end
+    return true, matched
 end
 
 -- Add a pattern to .git/info/exclude once. Returns true when this call added it.
@@ -887,6 +1060,12 @@ rex.action {
 
         local port = allocate_ports(root, args.name, cfg.port_block)
         write_env(root, args.name, path, branch, base, port, cfg)
+
+        local files_ok, files_err = apply_file_rules(root, path, cfg)
+        if not files_ok and files_err ~= nil then
+            rollback_add(root, args.name, path, branch, added_exclude, added_local_exclude)
+            error(files_err, 0)
+        end
 
         local ok_session, label_or_err, created = pcall(create_session, root, args.name, path, spec)
         if not ok_session then

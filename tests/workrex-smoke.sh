@@ -177,6 +177,44 @@ lane_p1() {
   rm -f "$REPO/.workrex.lua"
 }
 
+lane_p2() {
+  n=$(name_for p2)
+  write_config 'return { files = { copy = { ".env*" }, symlink = { "node_modules" } } }'
+  add_wt "$n" || { bad "p2 add" "worktree_add failed"; return; }
+  wt=$REPO"__worktrees/$n"
+  if [ -f "$wt/.env" ] && cmp -s "$wt/.env" "$REPO/.env"; then ok "p2 copy .env"; else bad "p2 copy .env" "missing or different"; fi
+  assert_file "p2 copy .env.local" "$wt/.env.local"
+  if [ -L "$wt/node_modules" ]; then ok "p2 symlink node_modules"; else bad "p2 symlink node_modules" "not a symlink"; fi
+  target=$(readlink "$wt/node_modules" 2>/dev/null || true)
+  case "$target" in
+    ../../*) ok "p2 symlink is relative" ;;
+    *) bad "p2 symlink is relative" "$target" ;;
+  esac
+  if (cd "$wt" && node -e "require.resolve('./node_modules/dep/index.js')" 2>/dev/null) || [ -f "$wt/node_modules/dep/index.js" ]; then
+    ok "p2 symlink resolves"
+  else
+    bad "p2 symlink resolves" "target missing"
+  fi
+  if [ "$(cat "$wt/tracked.txt")" = "keep" ]; then ok "p2 tracked file from checkout"; else bad "p2 tracked file from checkout" ""; fi
+
+  printf 'local instructions\n' >"$REPO/CLAUDE.local.md"
+  n2=$(name_for p2b)
+  add_wt "$n2"
+  if [ -L "$REPO"__worktrees/"$n2"/CLAUDE.local.md ]; then ok "p2 CLAUDE.local.md link"; else bad "p2 CLAUDE.local.md link" "missing"; fi
+
+  write_config 'return { files = { copy = { "../escape" } } }'
+  n3=$(name_for p2c)
+  out=$(run_action worktree_add name="$n3" agent=sh)
+  case "$out" in
+    *"escapes the repo"*) ok "p2 escape rejected" ;;
+    *) bad "p2 escape rejected" "$out" ;;
+  esac
+
+  remove_wt "$n"; remove_wt "$n2"
+  cleanup_wt "$n"; cleanup_wt "$n2"; cleanup_wt "$n3"
+  rm -f "$REPO/.workrex.lua" "$REPO/CLAUDE.local.md"
+}
+
 lane_p0_cleanup() {
   if rex ls 2>/dev/null | grep -q "proto/"; then
     bad "p0 no proto sessions" "found proto session"
@@ -189,7 +227,7 @@ case "${1:-all}" in
   reset) reset ;;
   p0) reset; lane_p0; lane_p0_duplicate; lane_p0_cleanup ;;
   p1) reset; lane_p1 ;;
-  p2) reset; say "p2 lanes not implemented yet" ;;
+  p2) reset; lane_p2 ;;
   p3) reset; say "p3 lanes not implemented yet" ;;
   p4) reset; say "p4 lanes not implemented yet" ;;
   p5) reset; say "p5 lanes not implemented yet" ;;
