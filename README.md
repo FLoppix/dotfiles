@@ -167,6 +167,9 @@ Rex keeps its own defaults; the prefix sequences below mirror the tmux workflow.
 
 ## Worktree sessions (workmux-style)
 
+Full usage guide: [`dot_config/rex/WORKREX.md`](dot_config/rex/WORKREX.md),
+also installed at `~/.config/rex/WORKREX.md`.
+
 `dot_config/rex/worktrees.lua` gives Rex a workmux-like flow: **one git
 worktree per session**, named `<project>/<name>` (e.g. `dotfiles/stripe-fix`).
 A session opens with an `nvim` window and an agent window for pi / claude /

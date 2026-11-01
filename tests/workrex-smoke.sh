@@ -28,6 +28,16 @@ assert_file() { # name path
 assert_no_file() { # name path
   if [ ! -e "$2" ]; then ok "$1"; else bad "$1" "exists $2"; fi
 }
+wait_for() { # command
+  i=0
+  while [ $i -lt 60 ]; do
+    if eval "$1"; then return 0; fi
+    sleep 0.5
+    i=$((i + 1))
+  done
+  return 1
+}
+
 assert_config() { # name key expected
   actual=$(git -C "$REPO" config --local --get "$2" 2>/dev/null || true)
   assert_eq "$1" "$3" "$actual"
@@ -304,7 +314,7 @@ lane_p4() {
   add_wt "$n"
   commit_in "$REPO"__worktrees/"$n" feature feat.txt
   run_action worktree_merge name="$n" strategy=merge >/dev/null 2>&1
-  sleep 5
+  wait_for "[ ! -e \"$REPO\"__worktrees/\"$n\" ]" || true
   if git -C "$REPO" log --oneline -5 | grep -q feature; then ok "p4 merge landed"; else bad "p4 merge landed" ""; fi
   assert_no_file "p4 merge removed worktree" "$REPO"__worktrees/"$n"
   if git -C "$REPO" show-ref --verify --quiet "refs/heads/wm/$n"; then bad "p4 merge deleted branch" "branch exists"; else ok "p4 merge deleted branch"; fi
@@ -316,7 +326,7 @@ lane_p4() {
   commit_in "$REPO"__worktrees/"$n2" branch-side conflict.txt
   commit_in "$REPO" main-side conflict.txt
   run_action worktree_merge name="$n2" >/dev/null 2>&1
-  sleep 5
+  wait_for "[ -z \"\$(git -C \"$REPO\" status --porcelain)\" ]" || true
   assert_file "p4 conflict keeps worktree" "$REPO"__worktrees/"$n2"
   if [ -z "$(git -C "$REPO" status --porcelain)" ]; then ok "p4 conflict target clean"; else bad "p4 conflict target clean" "$(git -C "$REPO" status --porcelain)"; fi
   cleanup_wt "$n2"
