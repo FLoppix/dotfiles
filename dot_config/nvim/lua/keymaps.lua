@@ -32,10 +32,41 @@ vim.keymap.set({ "n", "v" }, "<C-s>", ":w<CR>", { desc = "Save buffer", silent =
 vim.keymap.set("i", "<C-s>", "<C-o>:w<CR>", { desc = "Save buffer", silent = true })
 
 -- Window navigation
-vim.keymap.set("n", "<C-h>", "<C-w>h", { desc = "Focus left window" })
-vim.keymap.set("n", "<C-j>", "<C-w>j", { desc = "Focus down window" })
-vim.keymap.set("n", "<C-k>", "<C-w>k", { desc = "Focus up window" })
-vim.keymap.set("n", "<C-l>", "<C-w>l", { desc = "Focus right window" })
+--
+-- Inside nvim move between windows; at the edge of the layout hand the
+-- direction to the multiplexer (Rex, or tmux) so nvim windows and terminal
+-- panes behave like one layout, the way vim-tmux-navigator did under tmux.
+vim.g.tmux_navigator_no_mappings = 1 -- replaced by the mappings below
+
+local function mux_focus(rex_direction, tmux_flag)
+	local session = vim.env.REX_SESSION
+	if session ~= nil and session ~= "" then
+		local bin_dir = (vim.env.REX_BIN_DIR or ""):gsub("/$", "")
+		local bin = bin_dir == "" and "rex" or (bin_dir .. "/rex")
+		vim.system({ bin, "focus", rex_direction, "-s", session }, { detach = true })
+		return
+	end
+
+	if (vim.env.TMUX or "") ~= "" then
+		vim.system({ "tmux", "select-pane", tmux_flag }, { detach = true })
+	end
+end
+
+local function navigate(window_cmd, rex_direction, tmux_flag)
+	return function()
+		local before = vim.fn.winnr()
+		pcall(vim.cmd, "wincmd " .. window_cmd)
+		-- Same window number means nvim has nothing that way: leave nvim.
+		if vim.fn.winnr() == before then
+			mux_focus(rex_direction, tmux_flag)
+		end
+	end
+end
+
+vim.keymap.set("n", "<C-h>", navigate("h", "left", "-L"), { desc = "Focus left nvim window or Rex pane" })
+vim.keymap.set("n", "<C-j>", navigate("j", "down", "-D"), { desc = "Focus down nvim window or Rex pane" })
+vim.keymap.set("n", "<C-k>", navigate("k", "up", "-U"), { desc = "Focus up nvim window or Rex pane" })
+vim.keymap.set("n", "<C-l>", navigate("l", "right", "-R"), { desc = "Focus right nvim window or Rex pane" })
 vim.keymap.set("n", "<C-w>p", "<C-w>p", { desc = "Focus previous window" })
 
 -- Splits
