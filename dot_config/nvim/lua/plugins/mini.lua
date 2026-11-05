@@ -5,6 +5,9 @@ require("mini.cmdline").setup({
 })
 
 
+--- mini icons (file + directory glyphs, used by neo-tree and snacks) ---
+require("mini.icons").setup()
+
 --- mini pairs (auto-close brackets & quotes) ---
 require("mini.pairs").setup()
 

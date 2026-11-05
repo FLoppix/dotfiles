@@ -1,3 +1,29 @@
+local MiniIcons = require("mini.icons")
+
+-- Files keep nvim-web-devicons, exactly like neo-tree's own default provider.
+-- Directories ask mini.icons first, so known names (`.git`, `node_modules`,
+-- `src`, `tests`, `docs`, ...) get their own glyph and colour and everything
+-- else falls back to the open/closed folder glyphs below.
+local function icon_provider(icon, node, state)
+	if node.type == "directory" then
+		local glyph, hl, is_fallback = MiniIcons.get("directory", node.name)
+		if is_fallback then
+			return icon
+		end
+		return { text = glyph, highlight = hl }
+	end
+
+	local ok, devicons = pcall(require, "nvim-web-devicons")
+	if ok then
+		local name = node.type == "terminal" and "terminal" or node.name
+		local glyph, hl = devicons.get_icon(name)
+		icon.text = glyph or icon.text
+		icon.highlight = hl or icon.highlight
+	end
+
+	return icon
+end
+
 require("neo-tree").setup({
 	close_if_last_window = false,
 	enable_git_status = true,
@@ -23,7 +49,9 @@ require("neo-tree").setup({
 		icon = {
 			folder_closed = "",
 			folder_open = "",
-			folder_empty = "",
+			folder_empty = "󰉖",
+			folder_empty_open = "󰷏",
+			provider = icon_provider,
 		},
 		diagnostics = {
 			enabled = true,
