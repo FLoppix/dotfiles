@@ -126,7 +126,7 @@ git push
 | `C-space` | Prefix key |
 | `C-space + \|` | Split horizontal |
 | `C-space + -` | Split vertical |
-| `C-h/j/k/l` | Navigate panes (vim-tmux-navigator) |
+| `C-h/j/k/l` | Navigate panes (nvim splits first, then the pane) |
 | `C-space + r` | Reload config |
 | `C-space + arrows` | Resize panes |
 
@@ -137,6 +137,7 @@ Rex keeps its own defaults; the prefix sequences below mirror the tmux workflow.
 | Key | Action |
 |---|---|
 | `C-space` | Prefix for the sequences below |
+| `C-h/j/k/l` | Move between nvim splits, then out to the neighbouring Rex pane |
 | `C-space + \|` | Split right |
 | `C-space + -` | Split down |
 | `C-space + c` | New tab |
