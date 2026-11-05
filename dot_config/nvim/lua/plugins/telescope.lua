@@ -1,9 +1,38 @@
 local telescope = require("telescope")
 local builtin = require("telescope.builtin")
+local conf = require("telescope.config").values
 
 telescope.setup({})
 
-vim.keymap.set("n", "<leader>ff", builtin.find_files, { desc = "Telescope find files" })
+-- find_files shows nothing until the query matches something, instead of
+-- dumping the whole file list as soon as the picker opens.
+local function find_files_without_empty_results(opts)
+  local file_sorter = conf.file_sorter
+  conf.file_sorter = function(sorter_opts)
+    local sorter = file_sorter(sorter_opts)
+    local filter = sorter.filter_function
+    sorter.filter_function = function(self, prompt, entry, cb_add, cb_filter)
+      if prompt == nil or prompt == "" then
+        return -1 -- no query means no results
+      end
+      if filter then
+        return filter(self, prompt, entry, cb_add, cb_filter)
+      end
+      return 0, prompt -- passing the prompt through keeps the sorter working
+    end
+    return sorter
+  end
+
+  local ok, err = pcall(builtin.find_files, opts)
+  conf.file_sorter = file_sorter
+  if not ok then
+    error(err)
+  end
+end
+
+vim.keymap.set("n", "<leader>ff", function()
+  find_files_without_empty_results()
+end, { desc = "Telescope find files" })
 vim.keymap.set("n", "<leader>fw", builtin.live_grep, { desc = "Telescope live grep" })
 vim.keymap.set("n", "<leader>fr", function()
   builtin.oldfiles({ only_cwd = true })
