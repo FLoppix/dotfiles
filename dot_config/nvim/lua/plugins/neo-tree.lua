@@ -6,16 +6,20 @@ local MiniIcons = require("mini.icons")
 -- else falls back to the open/closed folder glyphs below.
 local function icon_provider(icon, node, state)
 	if node.type == "directory" then
-		local glyph, hl, is_fallback = MiniIcons.get("directory", node.name)
-		if is_fallback then
-			return icon
+		-- The tree's root node has no name; mini.icons requires a string.
+		local name = node.name
+		if name ~= nil and name ~= "" then
+			local ok, glyph, hl, is_fallback = pcall(MiniIcons.get, "directory", name)
+			if ok and not is_fallback then
+				return { text = glyph, highlight = hl }
+			end
 		end
-		return { text = glyph, highlight = hl }
+		return icon
 	end
 
 	local ok, devicons = pcall(require, "nvim-web-devicons")
 	if ok then
-		local name = node.type == "terminal" and "terminal" or node.name
+		local name = node.type == "terminal" and "terminal" or (node.name or "")
 		local glyph, hl = devicons.get_icon(name)
 		icon.text = glyph or icon.text
 		icon.highlight = hl or icon.highlight
