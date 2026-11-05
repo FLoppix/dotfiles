@@ -2,7 +2,10 @@ local lualine = require("lualine")
 
 lualine.setup({
 	options = {
-		theme = "catppuccin",
+		-- lualine ships no `catppuccin` theme, and nvim 0.12's built-in
+		-- catppuccin colorscheme does not provide one either. `auto` derives the
+		-- statusline colors from the active colorscheme and warns nothing.
+		theme = "auto",
 	},
 	sections = {
 		lualine_a = { "mode" },
