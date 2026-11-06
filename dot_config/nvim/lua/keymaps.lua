@@ -25,7 +25,11 @@ vim.keymap.set("n", "<leader>s", [[:%s/\<<C-r><C-w>\>/<C-r><C-w>/gI<Left><Left><
     { desc = "Replace word cursor is on globally" })
 vim.keymap.set("n", "<leader>X", "<cmd>!chmod +x %<CR>", { silent = true, desc = "makes file executable" })
 
-vim.keymap.set("n", "<leader>re", "<cmd>restart<cr>", { desc = "Restart config :restart)" })
+-- Reload the config. `restart!` skips the session restore that plain
+-- `:restart` now does (nvim 0.12): with the session restored, neo-tree's netrw
+-- hijack collides with the restored sidebar buffer name (E95). Unsaved changes
+-- still block the restart, so nothing is lost.
+vim.keymap.set("n", "<leader>re", "<cmd>restart!<cr>", { desc = "Restart config (:restart!)" })
 
 -- Save buffer with Ctrl+S
 vim.keymap.set({ "n", "v" }, "<C-s>", ":w<CR>", { desc = "Save buffer", silent = true })
