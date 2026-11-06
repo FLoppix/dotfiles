@@ -51,8 +51,8 @@ require("neo-tree").setup({
 	},
 	default_component_configs = {
 		icon = {
-			folder_closed = "",
-			folder_open = "",
+			-- folder_closed/folder_open are neo-tree's defaults (inherited);
+			-- leaving them unset is what puts a glyph on unknown directories.
 			folder_empty = "󰉖",
 			folder_empty_open = "󰷏",
 			provider = icon_provider,
