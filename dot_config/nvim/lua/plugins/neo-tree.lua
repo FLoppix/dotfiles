@@ -41,8 +41,11 @@ require("neo-tree").setup({
 		use_libuv_file_watcher = true,
 		filtered_items = {
 			visible = false,
-			hide_dotfiles = true,
+			-- dotfiles are shown like any other file; gitignored ones stay hidden
+			hide_dotfiles = false,
 			hide_gitignored = true,
+			-- .git is dotfile noise, never worth a row
+			never_show = { ".git" },
 		},
 	},
 	window = {

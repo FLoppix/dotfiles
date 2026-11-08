@@ -101,7 +101,7 @@ git push
 | Key | Action |
 |---|---|
 | `<leader>e` | Toggle file tree (Neo-tree) |
-| `<leader>ff` | Find files (Telescope) |
+| `<leader>ff` | Find files (Telescope, dotfiles included) |
 | `<leader>fw` | Live grep (Telescope) |
 | `<leader>fs` | Find symbols in buffer |
 | `<leader>fS` | Find symbols in workspace |

@@ -31,8 +31,13 @@ local function find_files_without_empty_results(opts)
 end
 
 vim.keymap.set("n", "<leader>ff", function()
-  find_files_without_empty_results()
-end, { desc = "Telescope find files" })
+	find_files_without_empty_results({
+		-- Show dotfiles as well. `rg` still respects .gitignore, so build
+		-- output stays out; only .git itself needs an explicit skip.
+		hidden = true,
+		file_ignore_patterns = { "^%.git/" },
+	})
+end, { desc = "Telescope find files (incl. hidden)" })
 vim.keymap.set("n", "<leader>fw", builtin.live_grep, { desc = "Telescope live grep" })
 vim.keymap.set("n", "<leader>fr", function()
   builtin.oldfiles({ only_cwd = true })
