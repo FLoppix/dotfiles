@@ -66,7 +66,8 @@ require('blink.cmp').setup({
         module = 'blink.cmp.sources.lsp',
         score_offset = 100,
         transform_items = function(_, items)
-          -- Filter: only show functions, methods, classes, constructors, interfaces, structs
+          -- Filter: show callable + type-ish kinds, and static properties/fields
+          -- (module members like `Schema.DateTimeUtc` arrive as Property/Field).
           local allowed_kinds = {
             [vim.lsp.protocol.CompletionItemKind.Function] = true,
             [vim.lsp.protocol.CompletionItemKind.Method] = true,
@@ -74,6 +75,12 @@ require('blink.cmp').setup({
             [vim.lsp.protocol.CompletionItemKind.Constructor] = true,
             [vim.lsp.protocol.CompletionItemKind.Interface] = true,
             [vim.lsp.protocol.CompletionItemKind.Struct] = true,
+            [vim.lsp.protocol.CompletionItemKind.Property] = true,
+            [vim.lsp.protocol.CompletionItemKind.Field] = true,
+            [vim.lsp.protocol.CompletionItemKind.Variable] = true,
+            [vim.lsp.protocol.CompletionItemKind.Constant] = true,
+            [vim.lsp.protocol.CompletionItemKind.Enum] = true,
+            [vim.lsp.protocol.CompletionItemKind.EnumMember] = true,
           }
           local filtered = {}
           for _, item in ipairs(items) do
