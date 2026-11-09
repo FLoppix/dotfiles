@@ -90,6 +90,7 @@
 - The `*_prompt` actions open a floating layer running a small `sh -c` script that calls `rex do -s "$1" ...`; the pickers need `fzf`, and `worktree_open_prompt` uses `jq`.
 - Prefix sequences mirror the tmux config: `ctrl+space>` (`|` split right, `-` split down, arrows resize, `r` reload).
 - Floating tool popups are custom actions (`popup_lazygit`, `popup_hunk`, `popup_ghui`, `popup_wt`); they open in the focused pane's working directory.
+- `context.popup` runs every command under the user's **login + interactive shell** (`context.login_cmd` wraps the argv in `zsh -lic`), so popups (and anything they spawn, e.g. git hooks run by lazygit) get the full terminal PATH — the server PATH inside actions has no node/brew tools.
 - Worktree actions are also CLI-invokable: `rex do worktree_add name=foo agent=pi`, `rex do worktree_open name=foo`, `rex do worktree_remove name=foo`.
 - After editing: `chezmoi apply ~/.config/rex`, then `rex config check` and `rex config reload`. Rex does not watch the file.
 - If `~/.config/rex` doesn't exist yet, `mkdir -p ~/.config/rex` before applying a single target.

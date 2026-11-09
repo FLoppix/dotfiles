@@ -164,7 +164,7 @@ Rex keeps its own defaults; the prefix sequences below mirror the tmux workflow.
 | `C-space + C-space` | Send a literal `C-space` to the terminal |
 
 > Rex's own defaults (Cmd-based shortcuts) still apply; the config is additive.
-> The popups open as floating panes in the focused pane's working directory.
+> The popups open as floating panes in the focused pane's working directory. Their commands run through the login shell (`zsh -lic`), so tools inside them (and anything they spawn, like git hooks) see the full terminal PATH.
 
 ## Worktree sessions (workmux-style)
 

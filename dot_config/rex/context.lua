@@ -70,7 +70,26 @@ function M.cwd_of(ctx)
     return os.getenv("HOME")
 end
 
+-- POSIX single-quote one argument so it can be joined into a shell command.
+local function sh_quote(s)
+    return "'" .. s:gsub("'", "'\\''") .. "'"
+end
+
+-- Wrap a command (argv table) so it runs under the user's login + interactive
+-- shell. Rex actions run with the server's minimal PATH, but popup commands
+-- like lazygit spawn git hooks (e.g. pre-push via vp) that need node and the
+-- rest of the terminal environment.
+function M.login_cmd(command)
+    local parts = {}
+    for i, arg in ipairs(command) do
+        parts[i] = sh_quote(arg)
+    end
+    return { "zsh", "-lic", table.concat(parts, " ") }
+end
+
 -- A floating pane running a command, in the caller's working directory.
+-- Commands run through the login shell so their environment matches a
+-- terminal pane (PATH, tool versions, …).
 function M.popup(ctx, command, label, bounds)
     local result, err = rex.session.new_layer {
         bounds = bounds,
@@ -79,7 +98,7 @@ function M.popup(ctx, command, label, bounds)
             flavor = M.shell,
             label = label,
             options = {
-                command = command,
+                command = M.login_cmd(command),
                 cwd = M.cwd_of(ctx),
             },
         },
